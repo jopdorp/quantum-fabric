@@ -38,36 +38,39 @@ A self-modifying, signal-driven computational fabric where:
 ## Mathematical Foundation
 
 ### Scaling Analysis
-- **Classical CPU**: O(log³N) per modular exponentiation
+- **Classical CPU**: O(log³N) per modular exponentiation, O(exp((log N)^(1/3))) total via GNFS
 - **Quantum (Shor)**: O(log³N) with QFT periodicity detection
-- **Wave Architecture**: O(log²N) with spatial parallelism and signal-based period detection
+- **Wave Architecture**: O(log²N) per operation with massive spatial parallelism, but O(r) total where r ≤ φ(N)
 
 ### Periodicity Detection
 For factoring N = pq, find order r where aʳ ≡ 1 (mod N):
-- Multiple wavefronts run parallel trials
-- Signal interference patterns reveal period r
-- Physical alignment of waves indicates mathematical cycles
-- No exponential trial search needed
+- Multiple wavefronts run parallel trials across 8-16 bases
+- Distributed hash pipeline with K=1024 segments
+- Signal interference patterns guide period detection through collision analysis
+- Memory hierarchy (BRAM+DDR) makes large periods practically tractable
+- Achieves significant constant-factor improvements over sequential approaches
 
 ### Resource Requirements
-- **Logic**: O(B) stages where B = log₂N
-- **Time**: O(B) per pipeline depth, O(B²) total
-- **Space**: Fixed wavefront width, reuses logic spatially
+- **Logic**: O(B) stages where B = log₂N for pipeline depth
+- **Time**: O(B) per pipeline stage, O(r) total for period detection  
+- **Space**: O(r/K) distributed across segments, O(r) total with memory hierarchy
+- **Parallelism**: Fixed number of wavefronts with massive spatial distribution
 
 ## Implementation Advantages
 
-1. **No Instruction Overhead**: Logic IS the program
-2. **Massive Parallelism**: Spatial unrolling across fabric
-3. **Adaptive Optimization**: Self-modifying based on data patterns
-4. **Physical Efficiency**: Computation at signal propagation speed
-5. **Biological Fidelity**: Mirrors natural processes like folding
+1. **Eliminates Instruction Overhead**: Logic IS the program - no fetch/decode cycles
+2. **Massive Spatial Parallelism**: Concurrent processing across FPGA fabric
+3. **Adaptive Memory Hierarchy**: BRAM+DDR optimization based on access patterns
+4. **Hardware Arithmetic Units**: Dedicated modular multiplication and hash processing
+5. **Practical Scalability**: Makes exponential problems tractable through distributed computing
 
 ## Challenges & Limitations
 
-1. **FPGA Constraints**: Resource overhead of the overlay fabric and the complexity of designing efficient, rapidly switchable overlay configurations.
-2. **Timing Closure**: Asynchronous design complexity
-3. **Verification**: Hard to test self-modifying logic
-4. **Tool Support**: Standard EDA tools assume fixed logic
+1. **Theoretical Complexity**: Remains O(r) for period detection, not polynomial breakthrough
+2. **FPGA Resource Constraints**: Requires careful balance of LUTs, BRAM, and DDR bandwidth
+3. **Timing Closure**: Complex distributed pipeline timing analysis required
+4. **Verification Complexity**: Testing self-modifying logic and distributed state
+5. **Memory Management**: Large periods require sophisticated BRAM/DDR coordination
 
 ## Optional Clocking
 

@@ -1,180 +1,148 @@
 #!/usr/bin/env python3
 """
-Wave Interference Factorization (v6.4)
-Autocorrelation‑Based Period Detection using Complex Modular Signals
-
-Changes in 6.4
---------------
-• **Single success print‑out** – suppress noisy duplicate prints coming from parallel
-  threads.  Only the *first* thread to find a factor prints, then every other
-  worker is cancelled.
-• **Clean early‑exit** – after a factor is discovered, all still‑queued futures are
-  cancelled and the executor is shut down so the harness moves immediately to
-  the next RSA size.
-• **Higher default depth cap** – lifted to `2**20` so RSA‑36+ has a better chance
-  without manual tweaking.
-• **Optional verbosity** – `wave_autocorr_factor()` now has a `verbose` flag; the
-  worker threads call it with `False`, while the main thread prints the single
-  success line.
+Wave Interference Factorization (v6.7)
+FFT-Based Autocorrelation + Randomized Bases + Adaptive Depth Scaling + Phase Preprocessing + Noise Filtering
 """
 
+import numpy as np
 import time
 from math import gcd, log2
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple, Optional
-
-import numpy as np
 from numba import jit
 from sympy import randprime
+from typing import List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from random import randint
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  ❖  RSA test‑case generation
-# ──────────────────────────────────────────────────────────────────────────────
-
-def generate_test_case(bit_size: int) -> Tuple[int, int, int]:
-    """Return (N, p, q) with p·q == N and ~bit_size bits total."""
+# Generate random RSA test case of bit size
+def generate_test_case(bit_size):
     half_bits = bit_size // 2
-    min_p = 1 << (half_bits - 1)
-    max_p = (1 << half_bits) - 1
-    p = randprime(min_p, max_p)
-    q = randprime(min_p, max_p)
+    min_prime = 2 ** (half_bits - 1)
+    max_prime = 2 ** half_bits - 1
+    p = randprime(min_prime, max_prime)
+    q = randprime(min_prime, max_prime)
     while q == p:
-        q = randprime(min_p, max_p)
+        q = randprime(min_prime, max_prime)
     return p * q, p, q
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  ❖  Core math helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
+# Generate modular exponentiation sequence
 @jit(nopython=True)
-def fast_modmul_sequence(a: int, N: int, length: int):
-    """Return [a, a², … a^length] mod N."""
-    out = [0] * length
+def fast_modmul_sequence(a, N, length):
+    result = [0] * length
     x = a % N
     for i in range(length):
-        out[i] = x
+        result[i] = x
         x = (x * a) % N
-    return out
+    return result
 
+# Hann window for smoothing
+def hann_window(length):
+    return 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(length) / length)
 
-def complex_mod_signal(a: int, N: int, length: int) -> np.ndarray:
-    """Map the mod‑exp sequence onto the unit circle as complex phases."""
-    seq = fast_modmul_sequence(a, N, length)
-    return np.exp(2j * np.pi * np.asarray(seq) / N)
+# Convert to complex-valued phase signal
+# Apply windowing to reduce spectral leakage
+def complex_modular_signal(a, N, length):
+    sequence = fast_modmul_sequence(a, N, length)
+    signal = np.exp(2j * np.pi * np.array(sequence) / N)
+    return signal * hann_window(length)
 
+# FFT-based autocorrelation with stronger normalization and top-ratio filtering
+def autocorrelation_phase(signal: np.ndarray, top_k: int = 5, min_peak_ratio: float = 3.0):
+    signal = signal - np.mean(signal)
+    signal = signal / np.abs(signal)
+    corr = np.fft.ifft(np.fft.fft(signal) * np.conj(np.fft.fft(signal)))
+    scores = np.abs(corr)
+    baseline = np.median(scores)
+    top = [(i, s) for i, s in enumerate(scores[1:], start=1) if s > baseline * min_peak_ratio]
+    top = sorted(top, key=lambda x: -x[1])[:top_k]
+    return top
 
-def top_autocorr_peaks(sig: np.ndarray, max_shift: int, top_k: int = 6):
-    """Return [(shift, score)] of top autocorrelation magnitudes."""
-    scores: List[Tuple[int, float]] = []
-    for d in range(1, max_shift):
-        shifted = np.roll(sig, d)
-        score = abs(np.vdot(sig, shifted))  # vdot = conj() on first arg
-        scores.append((d, score))
-    scores.sort(key=lambda x: -x[1])
-    return scores[:top_k]
+# Heuristically estimate how deep to go
+def estimate_max_depth(N, cap=2**18):
+    return min(max(int(N ** 0.3), 8192), cap)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  ❖  Parameter heuristics
-# ──────────────────────────────────────────────────────────────────────────────
-
-def estimate_max_depth(N: int, cap: int = 2 ** 20) -> int:
-    """Empirical depth ≈ N^0.30  (cap at 1 048 576)."""
-    return min(max(int(N ** 0.30), 8192), cap)
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  ❖  Wave autocorrelation factor finder (single a)
-# ──────────────────────────────────────────────────────────────────────────────
-
-def wave_autocorr_factor(N: int, a: int, max_depth: int, *, verbose=False) -> Optional[int]:
-    sig = complex_mod_signal(a, N, max_depth)
-    for r, _score in top_autocorr_peaks(sig, max_shift=max_depth // 2):
-        if r <= 0:
-            continue
-        y = pow(a, r // 2, N)
-        if y in (1, N - 1):
-            continue
-        for delta in (-1, 1):
-            f = gcd(y + delta, N)
-            if 1 < f < N:
-                if verbose:
-                    print(f"[🎯] Factor via wave autocorrelation: {f} (period~{r})")
-                return f
+# Core algorithm using autocorrelation to find period r, then compute factors
+def wave_autocorr_factor(N, a, max_depth):
+    for depth in [max_depth, max_depth * 2]:
+        signal = complex_modular_signal(a, N, depth)
+        peaks = autocorrelation_phase(signal, top_k=5)
+        for r, score in peaks:
+            if r <= 0:
+                continue
+            y = pow(a, r // 2, N)
+            if y != 1 and y != N - 1:
+                for delta in [-1, 1]:
+                    f = gcd(y + delta, N)
+                    if 1 < f < N:
+                        print(f"[🎯] Factor via wave autocorrelation: {f} (period ~{r})")
+                        return f
     return None
 
+# Pick random base coprime with N
+def random_coprime(N):
+    while True:
+        a = randint(2, N - 2)
+        if gcd(a, N) == 1:
+            return a
 
-# ──────────────────────────────────────────────────────────────────────────────
-#  ❖  Parallel sweep across many bases a
-# ──────────────────────────────────────────────────────────────────────────────
-
-def sweep_wave_autocorr(N: int, timeout_sec: int = 120) -> Optional[int]:
-    """Return a non‑trivial factor of N (or None)."""
+# Try various a values with timeout and fallback
+def sweep_wave_autocorr(N, timeout_sec=120, max_trials=90):
+    def try_a(a, max_depth):
+        return a, wave_autocorr_factor(N, a, max_depth)
 
     max_depth = estimate_max_depth(N)
     print(f"[📐] Using max_depth = 2^{{{int(log2(max_depth))}}} = {max_depth} for N = {N}")
 
-    # Helper so we can cancel fast once a factor appears
-    def try_base(a: int):
-        return a, wave_autocorr_factor(N, a, max_depth, verbose=False)
-
-    t0 = time.time()
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(try_base, a) for a in range(2, 512)]
-        for fut in as_completed(futures):
-            if time.time() - t0 > timeout_sec:
+    start_time = time.time()
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = [executor.submit(try_a, random_coprime(N), max_depth) for _ in range(max_trials)]
+        for future in as_completed(futures):
+            if time.time() - start_time > timeout_sec:
+                print("🕒 Timeout reached")
                 break
-            a, factor = fut.result()
-            if factor:
-                # Print once, cancel the rest, return.
-                print(f"✅ SUCCESS: {N} = {factor} × {N // factor} (base {a})")
-                # Cancel anything not yet started
-                pool.shutdown(wait=False, cancel_futures=True)
-                return factor
+            a, result = future.result()
+            if result:
+                print(f"✅ SUCCESS: {N} = {result} × {N // result} (base {a})")
+                return result
 
-    # Optional deeper retry
     print("⚠️  First sweep failed – expanding depth …")
-    max_depth *= 2
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(try_base, a) for a in range(2, 512)]
-        for fut in as_completed(futures):
-            if time.time() - t0 > timeout_sec * 2:
+    max_depth = min(max_depth * 2, 2**20)
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = [executor.submit(try_a, random_coprime(N), max_depth) for _ in range(max_trials)]
+        for future in as_completed(futures):
+            if time.time() - start_time > timeout_sec * 2:
+                print("🕒 Timeout reached on retry")
                 break
-            a, factor = fut.result()
-            if factor:
-                print(f"✅ SUCCESS: {N} = {factor} × {N // factor} (base {a})")
-                pool.shutdown(wait=False, cancel_futures=True)
-                return factor
+            a, result = future.result()
+            if result:
+                print(f"✅ SUCCESS: {N} = {result} × {N // result} (base {a})")
+                return result
 
     print("❌ FAILED: No factor found")
     return None
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-#  ❖  Test‑harness across several RSA sizes
-# ──────────────────────────────────────────────────────────────────────────────
-
+# Test for RSA-16 through RSA-64
 def test_wave_autocorr():
     print("🌊 Wave Interference Factorization via Autocorrelation")
     print("=" * 64)
-
-    for bits in (16, 20, 24, 28, 32, 36):
-        print(f"\n🎯 Generating RSA-{bits} test case…")
-        N, p, q = generate_test_case(bits)
+    bit_sizes = [16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64]
+    for bit_size in bit_sizes:
+        print(f"\n🎯 Generating RSA-{bit_size} test case…")
+        N, p, q = generate_test_case(bit_size)
         print(f"N = {N:,}")
         print(f"Expected factors: {p} × {q}")
 
-        t0 = time.time()
+        start = time.time()
         factor = sweep_wave_autocorr(N)
-        dt = time.time() - t0
-        print(f"⏱️  Time: {dt:.2f}s")
+        elapsed = time.time() - start
+        print(f"⏱️  Time: {elapsed:.2f}s")
 
         if factor:
             other = N // factor
-            ok = {factor, other} == {p, q}
-            print("🎉 CORRECT FACTORS FOUND!" if ok else "⚠️  Wrong factors 🙃")
+            if (factor == p and other == q) or (factor == q and other == p):
+                print("🎉 CORRECT FACTORS FOUND!")
+            else:
+                print(f"⚠️  Incorrect factors: {factor} × {other}")
         print("-" * 50)
-
 
 if __name__ == "__main__":
     test_wave_autocorr()

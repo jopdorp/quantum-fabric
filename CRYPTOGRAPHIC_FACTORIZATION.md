@@ -488,6 +488,7 @@ Scaling up to 4096 bits with larger arithmetic units:
    - **Security Issue**: Constant-time implementation needed for cryptographic security.
 
 ---
+
 This document outlines the cryptographic factorization process and resource requirements for implementing the wave-based computational architecture on FPGA hardware.
 
 ## Critical Algorithm Fixes Required
@@ -828,4 +829,4 @@ function arbitrate_resources(wavefronts: &mut [Wavefront]) {
         }
     }
 }
-```
+````

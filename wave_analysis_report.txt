@@ -1,0 +1,123 @@
+================================================================================
+WAVE FACTORIZATION ANALYSIS REPORT
+Algorithm: Enhanced Wave Factorizer
+================================================================================
+
+📊 PERFORMANCE SUMMARY
+----------------------------------------
+Total tests: 32
+Successes: 27
+Failures: 5
+Success rate: 84.4%
+Average time: 0.0600s
+Median time: 0.0000s
+Total time: 1.9194s
+
+🎯 SUCCESS RATE BY BIT LENGTH
+----------------------------------------
+ 9 bits:  1/ 1 (100.0%)
+10 bits:  5/ 5 (100.0%)
+11 bits:  1/ 1 (100.0%)
+12 bits:  2/ 2 (100.0%)
+13 bits:  1/ 1 (100.0%)
+14 bits:  7/ 7 (100.0%)
+15 bits:  4/ 4 (100.0%)
+16 bits:  2/ 3 (66.7%)
+17 bits:  1/ 1 (100.0%)
+18 bits:  3/ 4 (75.0%)
+19 bits:  0/ 3 (0.0%)
+
+⚡ COMPLEXITY ANALYSIS
+----------------------------------------
+Theoretical: O(n²) to O(n³)
+
+Bit Length | Avg Time | Avg Steps | Theoretical | Efficiency
+------------------------------------------------------------
+         9 |   0.0000 |         0 |          81 |       0.00
+        10 |   0.0000 |         0 |         100 |       0.00
+        11 |   0.0000 |         0 |         121 |       0.00
+        12 |   0.0015 |       174 |         144 |       1.21
+        13 |   0.0000 |         0 |         169 |       0.00
+        14 |   0.0008 |        77 |         196 |       0.39
+        15 |   0.0263 |      2375 |         225 |      10.56
+        16 |   0.0909 |     10240 |         256 |      40.00
+        17 |   0.0000 |         0 |         289 |       0.00
+        18 |   0.1368 |     15658 |         324 |      48.33
+        19 |   0.3284 |     43320 |         361 |     120.00
+
+💥 COLLISION DETECTION ANALYSIS
+----------------------------------------
+Total collisions - Low: 1, Medium: 0, High: 0
+
+Collision effectiveness by bit length:
+9 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+10 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+11 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+12 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+13 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+14 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+15 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+16 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+17 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+18 bits:
+     low: avg=0.0, max=0
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+19 bits:
+     low: avg=0.3, max=1
+     med: avg=0.0, max=0
+    high: avg=0.0, max=0
+
+❌ DETAILED FAILURE ANALYSIS
+----------------------------------------
+N = 43423 (16 bits)
+  Expected: 251 × 173
+  Time: 0.2725s
+  Steps: 30720, Periods: 0
+
+N = 194297 (18 bits)
+  Expected: 331 × 587
+  Time: 0.3371s
+  Steps: 38880, Periods: 0
+
+N = 300217 (19 bits)
+  Expected: 331 × 907
+  Time: 0.3262s
+  Steps: 43320, Periods: 0
+
+N = 319597 (19 bits)
+  Expected: 401 × 797
+  Time: 0.3287s
+  Steps: 43320, Periods: 0
+
+N = 357037 (19 bits)
+  Expected: 557 × 641
+  Time: 0.3305s
+  Steps: 43320, Periods: 0

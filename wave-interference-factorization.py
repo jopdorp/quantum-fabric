@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Wave Interference Factorization (v6.7)
-FFT-Based Autocorrelation + Randomized Bases + Adaptive Depth Scaling + Phase Preprocessing + Noise Filtering
+Wave Interference Factorization (v7.0)
+Phase-Based Autocorrelation + Randomized Bases + Adaptive Depth Scaling + Noise Filtering
 """
 
 import numpy as np
@@ -10,7 +10,7 @@ from math import gcd, log2
 from numba import jit
 from sympy import randprime
 from typing import List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, CancelledError
 from random import randint
 
 # Generate random RSA test case of bit size
@@ -45,16 +45,17 @@ def complex_modular_signal(a, N, length):
     signal = np.exp(2j * np.pi * np.array(sequence) / N)
     return signal * hann_window(length)
 
-# FFT-based autocorrelation with stronger normalization and top-ratio filtering
-def autocorrelation_phase(signal: np.ndarray, top_k: int = 5, min_peak_ratio: float = 3.0):
-    signal = signal - np.mean(signal)
-    signal = signal / np.abs(signal)
-    corr = np.fft.ifft(np.fft.fft(signal) * np.conj(np.fft.fft(signal)))
-    scores = np.abs(corr)
-    baseline = np.median(scores)
-    top = [(i, s) for i, s in enumerate(scores[1:], start=1) if s > baseline * min_peak_ratio]
-    top = sorted(top, key=lambda x: -x[1])[:top_k]
-    return top
+# Autocorrelation based on complex wave interference (not FFT)
+def autocorrelation_phase(signal: np.ndarray, top_k: int = 5, min_peak_ratio: float = 2.5):
+    scores = []
+    signal_energy = np.sum(np.abs(signal) ** 2)
+    for d in range(1, len(signal) // 2):
+        shifted = np.roll(signal, d)
+        score = np.abs(np.sum(signal * np.conj(shifted)))
+        scores.append((d, score))
+    baseline = np.median([s for _, s in scores])
+    top = [(d, s) for d, s in scores if s > baseline * min_peak_ratio]
+    return sorted(top, key=lambda x: -x[1])[:top_k]
 
 # Heuristically estimate how deep to go
 def estimate_max_depth(N, cap=2**18):
@@ -95,34 +96,44 @@ def sweep_wave_autocorr(N, timeout_sec=120, max_trials=90):
     start_time = time.time()
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures = [executor.submit(try_a, random_coprime(N), max_depth) for _ in range(max_trials)]
-        for future in as_completed(futures):
-            if time.time() - start_time > timeout_sec:
-                print("🕒 Timeout reached")
-                break
-            a, result = future.result()
-            if result:
-                print(f"✅ SUCCESS: {N} = {result} × {N // result} (base {a})")
-                return result
+        try:
+            for future in as_completed(futures):
+                if time.time() - start_time > timeout_sec:
+                    print("🕒 Timeout reached")
+                    break
+                a, result = future.result()
+                if result:
+                    print(f"✅ SUCCESS: {N} = {result} × {N // result} (base {a})")
+                    for f in futures:
+                        f.cancel()
+                    return result
+        except CancelledError:
+            pass
 
     print("⚠️  First sweep failed – expanding depth …")
     max_depth = min(max_depth * 2, 2**20)
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures = [executor.submit(try_a, random_coprime(N), max_depth) for _ in range(max_trials)]
-        for future in as_completed(futures):
-            if time.time() - start_time > timeout_sec * 2:
-                print("🕒 Timeout reached on retry")
-                break
-            a, result = future.result()
-            if result:
-                print(f"✅ SUCCESS: {N} = {result} × {N // result} (base {a})")
-                return result
+        try:
+            for future in as_completed(futures):
+                if time.time() - start_time > timeout_sec * 2:
+                    print("🕒 Timeout reached on retry")
+                    break
+                a, result = future.result()
+                if result:
+                    print(f"✅ SUCCESS: {N} = {result} × {N // result} (base {a})")
+                    for f in futures:
+                        f.cancel()
+                    return result
+        except CancelledError:
+            pass
 
     print("❌ FAILED: No factor found")
     return None
 
 # Test for RSA-16 through RSA-64
 def test_wave_autocorr():
-    print("🌊 Wave Interference Factorization via Autocorrelation")
+    print("🌊 Wave Interference Factorization via Phase Autocorrelation")
     print("=" * 64)
     bit_sizes = [16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64]
     for bit_size in bit_sizes:

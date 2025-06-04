@@ -169,3 +169,30 @@ An overlay is a virtual hardware layer implemented on top of the FPGA fabric. It
 **Examples and Variants**:
 - Overlays can range from simple template-based systems to more complex dynamically composed soft Coarse-Grained Reconfigurable Architectures (CGRAs).
 - Projects like QUICKDough demonstrate caching and reuse of kernel configurations via overlays, while others explore reconfigurable Arithmetic Logic Units (ALUs) for common operations, aligning with the adaptive nature of the wave computing paradigm.
+
+## Enhancements: Traveling Storage and Computational Wave Period Handling
+
+### Traveling Storage
+The wave-based computational architecture employs traveling storage, where intermediate values are carried along with the computational wavefront. This approach:
+
+- **Minimizes Memory Overhead**: Only active segments of the wave require storage.
+- **Dynamic Allocation**: Logic cells allocate memory resources dynamically as the wave propagates.
+- **Improves Scalability**: Avoids centralized storage bottlenecks, enabling efficient handling of larger computations.
+
+### Computational Wave Period Handling
+The architecture addresses the period length challenge through:
+
+1. **Signal Feedback Mechanisms**:
+   - Signal-driven feedback loops dynamically detect periodicity.
+   - Interference patterns and resonance are used to identify cycles efficiently.
+
+2. **Segmented Wavefronts**:
+   - The wavefront is divided into smaller segments, each responsible for detecting periodicity locally.
+   - This segmentation reduces computational complexity and ensures scalability.
+
+3. **Probabilistic Period Detection**:
+   - Monte Carlo sampling is employed to approximate period length.
+   - This trades accuracy for polynomial space and time complexity, mitigating exponential scaling risks.
+
+These enhancements ensure that the wave-based computational architecture remains efficient and scalable for larger values of N.
+

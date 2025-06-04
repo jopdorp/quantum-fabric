@@ -201,6 +201,27 @@ Combine wave-based spatial parallelism with classical algorithms:
 - Classical algorithms for period detection (with known complexity)
 - Realistic performance expectations and resource requirements
 
+### Scaling Analysis
+
+#### Traveling Storage and Dynamic Period Handling
+The wave-based architecture employs traveling storage and dynamic period handling to address scalability challenges:
+
+- **Traveling Storage**:
+  - Intermediate values are carried along with the computational wavefront, minimizing centralized storage requirements.
+  - Storage is dynamically allocated to logic cells as the wave propagates, reducing memory overhead and enabling practical handling of larger values of N.
+
+- **Dynamic Period Handling**:
+  - Signal-driven feedback loops dynamically detect periodicity without exhaustive computation.
+  - Interference patterns and resonance are leveraged to identify cycles efficiently.
+  - The wavefront is divided into smaller segments, each responsible for detecting periodicity locally, reducing computational complexity.
+  - Approximation methods, such as Monte Carlo sampling, are employed to estimate period length, trading accuracy for polynomial space and time complexity.
+
+#### Complexity Analysis
+With traveling storage and dynamic period handling:
+- **Storage Requirements**: Reduced to O(log N) per active segment.
+- **Period Detection**: Efficiently handled using signal feedback and probabilistic methods.
+- **Overall Scalability**: Improved scalability for larger values of N, with polynomial resource utilization in practical scenarios.
+
 ## Conclusion
 
 The wave-based computational architecture provides genuine innovations in spatial parallelism and signal-driven computation. However, it **cannot escape the fundamental exponential scaling barriers** inherent in the integer factorization problem.

@@ -829,4 +829,4 @@ function arbitrate_resources(wavefronts: &mut [Wavefront]) {
         }
     }
 }
-````
+```

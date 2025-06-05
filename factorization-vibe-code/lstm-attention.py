@@ -127,4 +127,4 @@ def run_wave_until(bits=256, step=16):
 
 
 if __name__ == "__main__":
-    run_wave_until(400, step=16)
+    run_wave_until(400, step=4)

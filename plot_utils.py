@@ -7,12 +7,12 @@ def create_plot(VISIBLE_FRAMES):
     """Create the plot layout for displaying frames."""
     fig = plt.figure(figsize=(18, 9))
 
-    # Create grid layout: 3 rows (real, imag, phase) x VISIBLE_FRAMES columns + navigation
-    gs = gridspec.GridSpec(4, VISIBLE_FRAMES, figure=fig, height_ratios=[1, 1, 1, 0.1])
+    # Create grid layout: 4 rows (real, imag, phase, prob) x VISIBLE_FRAMES columns + navigation
+    gs = gridspec.GridSpec(5, VISIBLE_FRAMES, figure=fig, height_ratios=[1, 1, 1, 1, 0.1])
 
     # Create subplots for the visible frames
     axes = []
-    for row in range(3):
+    for row in range(4):
         row_axes = []
         for col in range(VISIBLE_FRAMES):
             ax = fig.add_subplot(gs[row, col])
@@ -20,12 +20,12 @@ def create_plot(VISIBLE_FRAMES):
         axes.append(row_axes)
 
     # Navigation buttons
-    ax_prev = fig.add_subplot(gs[3, :VISIBLE_FRAMES // 2])
-    ax_next = fig.add_subplot(gs[3, VISIBLE_FRAMES // 2:])
+    ax_prev = fig.add_subplot(gs[4, :VISIBLE_FRAMES // 2])
+    ax_next = fig.add_subplot(gs[4, VISIBLE_FRAMES // 2:])
 
     return fig, axes, ax_prev, ax_next
 
-def update_plot(start_idx, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, axes, fig):
+def update_plot(start_idx, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, frames_prob, axes, fig):
     """Update the plot with the current range of frames."""
     current_start = max(0, min(start_idx, TIME_STEPS - VISIBLE_FRAMES))
 
@@ -47,9 +47,15 @@ def update_plot(start_idx, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_rea
             axes[2][col].clear()
             axes[2][col].imshow(frames_phase[frame_idx], cmap='twilight', vmin=-np.pi, vmax=np.pi)
             axes[2][col].axis('off')
+
+            # Probability density
+            axes[3][col].clear()
+            axes[3][col].imshow(frames_prob[frame_idx], cmap='hot', vmin=0, vmax=np.max(frames_prob[frame_idx]))
+            axes[3][col].axis('off')
+            axes[3][col].set_title(f"Probability Density", fontsize=10)
         else:
             # Clear axes if no more frames
-            for row in range(3):
+            for row in range(4):
                 axes[row][col].clear()
                 axes[row][col].axis('off')
 
@@ -57,6 +63,7 @@ def update_plot(start_idx, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_rea
     axes[0][0].set_ylabel("Real(ψ)", fontsize=12)
     axes[1][0].set_ylabel("Imag(ψ)", fontsize=12)
     axes[2][0].set_ylabel("Phase(ψ)", fontsize=12)
+    axes[3][0].set_ylabel("Probability Density", fontsize=12)
 
     # Update title with current range
     end_idx = min(current_start + VISIBLE_FRAMES - 1, TIME_STEPS - 1)
@@ -66,17 +73,17 @@ def update_plot(start_idx, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_rea
 
     return current_start
 
-def setup_navigation(fig, axes, ax_prev, ax_next, VISIBLE_FRAMES, TIME_STEPS, frames_real, frames_imag, frames_phase):
+def setup_navigation(fig, axes, ax_prev, ax_next, VISIBLE_FRAMES, TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob):
     """Set up navigation buttons and callbacks for the plot."""
     current_start = 0
 
     def prev_frames(event):
         nonlocal current_start
-        current_start = update_plot(current_start - VISIBLE_FRAMES, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, axes, fig)
+        current_start = update_plot(current_start - VISIBLE_FRAMES, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, frames_prob, axes, fig)
 
     def next_frames(event):
         nonlocal current_start
-        current_start = update_plot(current_start + VISIBLE_FRAMES, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, axes, fig)
+        current_start = update_plot(current_start + VISIBLE_FRAMES, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, frames_prob, axes, fig)
 
     btn_prev = Button(ax_prev, '◀ Previous')
     btn_next = Button(ax_next, 'Next ▶')
@@ -84,17 +91,17 @@ def setup_navigation(fig, axes, ax_prev, ax_next, VISIBLE_FRAMES, TIME_STEPS, fr
     btn_next.on_clicked(next_frames)
 
     # Initial plot
-    current_start = update_plot(0, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, axes, fig)
+    current_start = update_plot(0, current_start, TIME_STEPS, VISIBLE_FRAMES, frames_real, frames_imag, frames_phase, frames_prob, axes, fig)
 
     return btn_prev, btn_next
 
-def create_and_show_plot(VISIBLE_FRAMES, TIME_STEPS, frames_real, frames_imag, frames_phase):
+def create_and_show_plot(VISIBLE_FRAMES, TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob):
     """Create the plot, set up navigation, and show it."""
     # Create the plot
     fig, axes, ax_prev, ax_next = create_plot(VISIBLE_FRAMES)
     
     # Set up navigation
-    setup_navigation(fig, axes, ax_prev, ax_next, VISIBLE_FRAMES, TIME_STEPS, frames_real, frames_imag, frames_phase)
+    setup_navigation(fig, axes, ax_prev, ax_next, VISIBLE_FRAMES, TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob)
     
     plt.tight_layout()
     plt.show()

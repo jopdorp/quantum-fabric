@@ -16,11 +16,20 @@ DT = 0.5
 # --- Initial wave packet: Gaussian with momentum ---
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
 center_x, center_y = SIZE // 2, SIZE // 2
-r2 = (X - center_x)**2 + (Y - center_y)**2
-sigma = 6
-momentum = np.exp(1j * 2 * pi * X / 24)
-psi_t = np.exp(-r2 / (2 * sigma**2)) * momentum
-psi_t = psi_t.astype(np.complex128)
+
+def create_bit(x, y, center_x, center_y, wave_length=96):
+    """Create a quantum bit with Gaussian profile and momentum."""
+    r2 = (x - center_x)**2 + (y - center_y)**2
+    sigma = 6
+    momentum = np.exp(1j * 2 * pi * x / wave_length)
+    psi = np.exp(-r2 / (2 * sigma**2)) * momentum
+    return psi.astype(np.complex128)
+
+# create first bit
+psi_t = create_bit(X, Y, center_x, center_y, 19)
+
+# create second bit with different momentum and position
+psi_t = create_bit(X, Y, center_x + 24, center_y + 16, 48) + psi_t
 
 # --- Quantum gate functions ---
 def hadamard(amp): return amp * (1 + 1j) / np.sqrt(2)
@@ -62,17 +71,31 @@ def propagate_wave(psi, dt=DT):
     psi_hat *= kinetic_phase
     return np.fft.ifft2(psi_hat)
 
-# --- Center-of-mass tracker ---
+# --- Center-of-mass tracker with smoothing ---
+# Global variables for smoothing
+smooth_cy = SIZE // 2
+smooth_cx = SIZE // 2
+smoothing_factor = 2000
+
 def center_wave(psi):
-    prob = np.abs(psi)**2
+    global smooth_cy, smooth_cx, smoothing_factor
+    prob = np.abs(psi)**2  # Use the last frame's probability density
     total = np.sum(prob)
     if total == 0:
         return psi  # nothing to center
+    
     y_idx, x_idx = np.indices(prob.shape)
-    cy = int(np.round(np.sum(y_idx * prob) / total))
-    cx = int(np.round(np.sum(x_idx * prob) / total))
-    shift_y = (SIZE // 2) - cy
-    shift_x = (SIZE // 2) - cx
+    cy = np.sum(y_idx * prob) / total
+    cx = np.sum(x_idx * prob) / total
+    
+    # Apply exponential smoothing
+    smooth_cy = smooth_cy + (cy - smooth_cy) / smoothing_factor
+    smooth_cx = smooth_cx + (cx - smooth_cx) / smoothing_factor
+    
+    # Calculate shifts using smoothed center
+    shift_y = int(np.round((SIZE // 2) - smooth_cy))
+    shift_x = int(np.round((SIZE // 2) - smooth_cx))
+    
     return np.roll(np.roll(psi, shift_y, axis=0), shift_x, axis=1)
 
 # --- Run simulation ---

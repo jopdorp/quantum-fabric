@@ -51,33 +51,33 @@ def create_video(TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob
     
     # Generate and write frames directly
     for t in range(TIME_STEPS):
-        # Use frame-by-frame normalization for better contrast (like the plot does)
+        # Use frame-by-frame normalization for better contrast
         frame_real = frames_real[t]
         frame_imag = frames_imag[t]
         frame_prob = frames_prob[t]
+        frame_phase = frames_phase[t]
         
-        # Calculate per-frame ranges using percentiles
-        real_frame_min, real_frame_max = np.percentile(frame_real, [5, 95])
-        imag_frame_min, imag_frame_max = np.percentile(frame_imag, [5, 95])
+        # Calculate per-frame ranges using percentiles for better contrast
+        real_frame_min, real_frame_max = np.percentile(frame_real, [1, 99])
         prob_frame_min, prob_frame_max = np.percentile(frame_prob, [5, 95])
         
-        # Ensure we don't have zero ranges
-        if np.abs(real_frame_max - real_frame_min) < 1e-10:
-            real_frame_min = np.min(frame_real)
-            real_frame_max = np.max(frame_real)
-        if np.abs(imag_frame_max - imag_frame_min) < 1e-10:
-            imag_frame_min = np.min(frame_imag)
-            imag_frame_max = np.max(frame_imag)
-        if np.abs(prob_frame_max - prob_frame_min) < 1e-10:
-            prob_frame_min = np.min(frame_prob)
-            prob_frame_max = np.max(frame_prob)
-        
-        # Apply colormaps using per-frame ranges
+        # For imaginary component, use absolute values for better visibility
+        abs_imag = np.abs(frame_imag)
+        if np.max(abs_imag) > 1e-10:  # Check if there's meaningful imaginary data
+            imag_frame_min, imag_frame_max = np.percentile(abs_imag, [0.1, 99.9])
+            if imag_frame_max - imag_frame_min < 1e-10:
+                imag_frame_min = 0
+                imag_frame_max = np.max(abs_imag) if np.max(abs_imag) > 0 else 1e-6
+        else:
+            abs_imag = np.zeros_like(frame_imag)
+            imag_frame_min, imag_frame_max = 0, 1e-6
+
+        # Apply colormaps with proper scaling
         real_colored = apply_colormap(frame_real, 'coolwarm', real_frame_min, real_frame_max)
-        imag_colored = apply_colormap(frame_imag, 'coolwarm', imag_frame_min, imag_frame_max)
-        phase_colored = apply_colormap(frames_phase[t], 'twilight', -np.pi, np.pi)
+        imag_colored = apply_colormap(abs_imag, 'plasma', imag_frame_min, imag_frame_max)
+        phase_colored = apply_colormap(frame_phase, 'twilight', -np.pi, np.pi)  # Smooth fabric-like phase
         prob_colored = apply_colormap(frame_prob, 'hot', prob_frame_min, prob_frame_max)
-       
+
         # Stitch frames horizontally
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
         

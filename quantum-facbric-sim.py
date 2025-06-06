@@ -6,37 +6,32 @@ from plot_utils import create_and_show_plot
 from video_utils import create_video, open_video
 
 # Grid and simulation parameters
-SIZE = 128
+SIZE = 256
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = SIZE
+TIME_STEPS = SIZE * 2
 MAX_GATES_PER_CELL = 4
-DT = 0.1
+DT = 0.5
 
-# --- Improved Gaussian + directional motion ---
+# --- Initial wave packet: Gaussian with momentum ---
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
-center_x, center_y = SIZE // 2 - 30, SIZE // 2  # Start left of center
+center_x, center_y = SIZE // 2, SIZE // 2
 r2 = (X - center_x)**2 + (Y - center_y)**2
 sigma = 6
-momentum = np.exp(1j * 2 * pi * X / 48)  # Rightward motion
+momentum = np.exp(1j * 2 * pi * X / 24)
 psi_t = np.exp(-r2 / (2 * sigma**2)) * momentum
 psi_t = psi_t.astype(np.complex128)
 
 # --- Quantum gate functions ---
-def hadamard(amp):
-    return amp * (1 + 1j) / np.sqrt(2)
-
-def pauli_x(amp):
-    return -amp
-
-def t_gate(amp):
-    return amp * np.exp(1j * pi / 4)
+def hadamard(amp): return amp * (1 + 1j) / np.sqrt(2)
+def pauli_x(amp): return -amp
+def t_gate(amp): return amp * np.exp(1j * pi / 4)
 
 # --- Patch-based gate storage ---
 gate_patch_map = np.full((GRID_HEIGHT, GRID_WIDTH, MAX_GATES_PER_CELL), None, dtype=object)
 
 def add_gate_patch(gate_patch_map, center_y, center_x, gate_fn):
-    radius = 3
+    radius = 2
     for y in range(center_y - radius, center_y + radius + 1):
         for x in range(center_x - radius, center_x + radius + 1):
             if 0 <= y < GRID_HEIGHT and 0 <= x < GRID_WIDTH:
@@ -57,18 +52,28 @@ def apply_spatial_gates_from_patch(psi, gate_patch_map):
                         updated[y, x] = gate_fn(updated[y, x])
     return updated
 
-# --- Schrödinger-like wave propagation ---
+# --- Split-Step Fourier propagation ---
 def propagate_wave(psi, dt=DT):
-    laplacian = (
-        np.roll(psi, 1, axis=0) + np.roll(psi, -1, axis=0) +
-        np.roll(psi, 1, axis=1) + np.roll(psi, -1, axis=1) - 4 * psi
-    )
-    return psi + 1j * dt * laplacian
+    psi_hat = np.fft.fft2(psi)
+    kx = np.fft.fftfreq(psi.shape[1]) * 2 * np.pi
+    ky = np.fft.fftfreq(psi.shape[0]) * 2 * np.pi
+    KX, KY = np.meshgrid(kx, ky)
+    kinetic_phase = np.exp(-1j * dt * (KX**2 + KY**2))
+    psi_hat *= kinetic_phase
+    return np.fft.ifft2(psi_hat)
 
-# --- Add spatial gate regions ---
-add_gate_patch(gate_patch_map, center_y + 10, center_x + 20, hadamard)
-add_gate_patch(gate_patch_map, center_y - 8, center_x + 4, pauli_x)
-add_gate_patch(gate_patch_map, center_y - 3, center_x + 15, t_gate)
+# --- Center-of-mass tracker ---
+def center_wave(psi):
+    prob = np.abs(psi)**2
+    total = np.sum(prob)
+    if total == 0:
+        return psi  # nothing to center
+    y_idx, x_idx = np.indices(prob.shape)
+    cy = int(np.round(np.sum(y_idx * prob) / total))
+    cx = int(np.round(np.sum(x_idx * prob) / total))
+    shift_y = (SIZE // 2) - cy
+    shift_x = (SIZE // 2) - cx
+    return np.roll(np.roll(psi, shift_y, axis=0), shift_x, axis=1)
 
 # --- Run simulation ---
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
@@ -76,15 +81,17 @@ cur = psi_t.copy()
 
 for _ in range(TIME_STEPS):
     cur = propagate_wave(cur)
+    cur = center_wave(cur)  # center using COM
     cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
 
-    frames_real.append(np.real(cur))
-    frames_imag.append(np.imag(cur))
-    frames_phase.append(np.angle(cur))
-    frames_prob.append(np.abs(cur)**2)
+    region = cur[SIZE//4:3*SIZE//4, SIZE//4:3*SIZE//4]
+    frames_real.append(np.real(region))
+    frames_imag.append(np.imag(region))
+    frames_phase.append(np.angle(region))
+    frames_prob.append(np.abs(region)**2)
 
-# --- Create video with all 4 views (real, imag, phase, prob) ---
-video_file = "quantum_wave_simulation.mkv"
+# --- Create video ---
+video_file = "quantum_wave_centered.mkv"
 create_video(
     TIME_STEPS,
     frames_real,
@@ -96,8 +103,3 @@ create_video(
 )
 
 open_video(video_file)
-create_and_show_plot(
-    9,
-    TIME_STEPS,
-    frames_real, frames_imag, frames_phase, frames_prob
-)

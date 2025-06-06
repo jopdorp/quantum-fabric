@@ -162,6 +162,24 @@ smooth_cy = SIZE // 2
 smooth_cx = SIZE // 2
 smoothing_factor = 2000
 
+# Define stable states for hydrogen (quantum numbers and orbital radii)
+stable_states = [
+    (1, 0, 0, 25),  # Ground state
+    (2, 1, 1, 50),  # Excited state 1
+    (3, 2, 2, 75),  # Excited state 2
+    (4, 3, 3, 100)  # Excited state 3
+]
+
+# Function to interpolate between two wavefunctions
+def tween_wavefunctions(psi_start, psi_end, alpha):
+    return (1 - alpha) * psi_start + alpha * psi_end
+
+# Initialize variables for tweening
+current_state_index = 0
+next_state_index = 1
+tween_duration = 30  # Number of time steps for a 1-second tween (assuming 30 FPS)
+tween_step = 0
+
 # Simulation loop
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
 cur = psi_t.copy()
@@ -173,10 +191,36 @@ for step in range(TIME_STEPS):
     if step % 50 == 0:
         print(f"Step {step}/{TIME_STEPS}")
 
+    # Tweening logic
+    if tween_step < tween_duration:
+        # Get the current and next stable states
+        current_state = stable_states[current_state_index]
+        next_state = stable_states[next_state_index]
+
+        # Generate wavefunctions for the current and next states
+        psi_current = create_orbital_electron(X, Y, center_x, center_y, current_state[3], current_state[:3])
+        psi_next = create_orbital_electron(X, Y, center_x, center_y, next_state[3], next_state[:3])
+
+        # Interpolate between the two states
+        alpha = tween_step / tween_duration
+        cur = tween_wavefunctions(psi_current, psi_next, alpha)
+
+        # Normalize the wavefunction
+        cur = normalize_wavefunction(cur)
+
+        tween_step += 1
+    else:
+        # Move to the next stable state
+        current_state_index = next_state_index
+        next_state_index = (next_state_index + 1) % len(stable_states)
+        tween_step = 0
+
+    # Propagate the wavefunction
     cur = propagate_wave_with_potential(cur, nuclear_potential)
     cur = center_wave(cur)
     cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
 
+    # Record frames for visualization
     region = cur[SIZE//4:3*SIZE//4, SIZE//4:3*SIZE//4]
     frames_real.append(np.real(region))
     frames_imag.append(np.imag(region))

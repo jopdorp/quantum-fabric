@@ -278,33 +278,69 @@ next_state_index = 1
 
 # Simulation loop
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
-print("Simulating hydrogen molecule with electron-electron repulsion...")
+cur = psi1.copy()
+print("Simulating hydrogen atom with single electron...")
 print(f"Time steps: {TIME_STEPS}, dt: {DT}")
 
 for step in range(TIME_STEPS):
     if step % 50 == 0:
         print(f"Step {step}/{TIME_STEPS}")
 
+    if stay_step < stay_duration:
+        # Stay in the current state
+        if stay_step == 0:  # Only create the wavefunction once per state
+            current_state = stable_states[current_state_index]
+            cur = hydrogen_eigenstate_2d(current_state[0], current_state[1], X, Y, center_x, center_y, scale=SCALE)
+            cur = normalize_wavefunction(cur)
+        stay_step += 1
+    elif tween_step < tween_duration:
+        # Tweening logic
+        current_state = stable_states[current_state_index]
+        next_state = stable_states[next_state_index]
+
+        # Generate wavefunctions for the current and next states
+        psi_current = hydrogen_eigenstate_2d(current_state[0], current_state[1], X, Y, center_x, center_y, scale=SCALE)
+        psi_next = hydrogen_eigenstate_2d(next_state[0], next_state[1], X, Y, center_x, center_y, scale=SCALE)
+
+        # Interpolate between the two states
+        alpha = tween_step / tween_duration
+        cur = tween_wavefunctions(psi_current, psi_next, alpha)
+
+        # Add momentum during tweening to create imaginary components
+        # Using KX and KY for tweening momentum, scaled by alpha
+        momentum_x = KX * 0.1 * alpha  # Using global KX
+        momentum_y = KY * 0.1 * alpha  # Using global KY
+        # X and Y are the global meshgrid variables
+        momentum_phase = np.exp(1j * (momentum_x * X + momentum_y * Y))
+        cur *= momentum_phase
+
+        # Normalize the wavefunction
+        cur = normalize_wavefunction(cur)
+
+        tween_step += 1
+    else:
+        # Move to the next stable state
+        current_state_index = next_state_index
+        next_state_index = (next_state_index + 1) % len(stable_states)
+        stay_step = 0
+        tween_step = 0
+
     # Add mean-field repulsion dynamically
     V1 = nuclear_potential1 + add_mean_field_coulomb_repulsion(psi2)
     V2 = nuclear_potential2 + add_mean_field_coulomb_repulsion(psi1)
 
-    # Propagate both wavefunctions with their respective potentials
     psi1 = propagate_wave_with_potential(psi1, V1)
     psi2 = propagate_wave_with_potential(psi2, V2)
     
-    # Apply spatial processing to individual wavefunctions
-    psi1 = center_wave(psi1)
-    psi2 = center_wave(psi2)
-    
-    psi1 = apply_edge_blur(psi1)
-    psi2 = apply_edge_blur(psi2)
-    
-    psi1 = apply_absorption_edge_low_pass(psi1, cutoff_frequency=0.1)
-    psi2 = apply_absorption_edge_low_pass(psi2, cutoff_frequency=0.1)
+    # The following lines involving 'cur' will be updated or removed by subsequent edits
+    # cur = center_wave(cur)
+    # cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
+    # cur = apply_edge_blur(cur)
+    # cur = apply_absorption_edge_low_pass(cur, cutoff_frequency=0.1)
 
-    # Record frames for visualization - display both electrons' combined wavefunction
-    region = psi1 + psi2
+    # Record frames for visualization
+    # region = cur  # Visualize the entire grid # This line will be replaced
+    region = psi1 + psi2 # Display both electrons' combined wavefunction
     frames_real.append(np.real(region))
     frames_imag.append(np.imag(region))
 

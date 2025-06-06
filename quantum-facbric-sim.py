@@ -9,96 +9,141 @@ from video_utils import create_video, open_video
 SIZE = 256
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = SIZE * 3  # Longer simulation for orbital dynamics
+TIME_STEPS = SIZE * 3
 MAX_GATES_PER_CELL = 4
-DT = 2  # Smaller time step for stability with potential
+DT = 2
 
 # --- Initial wave packet: Gaussian with momentum ---
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
 center_x, center_y = SIZE // 2, SIZE // 2
 
-def create_electron(x, y, center_x, center_y, wave_length=96):
-    """Create an electron wavefunction with Gaussian profile and orbital momentum."""
-    r2 = (x - center_x)**2 + (y - center_y)**2
-    sigma = 6  # Larger orbital size for electrons
-    # Add orbital angular momentum
-    momentum = np.exp(1j * 2 * pi * x / wave_length)
-    psi = np.exp(-r2 / (2 * sigma**2)) * momentum
-    return psi.astype(np.complex128)
-
-# Create atomic nucleus potential (attractive Coulomb potential)
-def create_nucleus_potential(x, y, nucleus_x, nucleus_y, charge=1):
-    """Create Coulomb potential for atomic nucleus."""
-    r = np.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2)
-    # Avoid singularity at nucleus
-    r = np.maximum(r, 1.0)
-    # Coulomb potential: V = -k*Z/r (attractive for electrons)
-    potential_strength = 0.2  # Scaled for simulation stability
-    return -potential_strength * charge / r
-
-# Nuclear position (center of atom) - nucleus itself is not visualized
-nucleus_x, nucleus_y = center_x, center_y
-nuclear_potential = create_nucleus_potential(X, Y, nucleus_x, nucleus_y, charge=1)
-
-# Add electron-electron repulsion potential (for future multi-electron extensions)
-def create_electron_repulsion(psi, repulsion_strength=0.1):
-    """Add electron-electron repulsion based on current electron density.
-    Note: Currently unused in single-electron hydrogen simulation."""
-    electron_density = np.abs(psi)**2
-    # Smooth the density to avoid numerical instabilities
-    from scipy.ndimage import gaussian_filter
-    try:
-        smoothed_density = gaussian_filter(electron_density, sigma=2.0)
-    except:
-        # Fallback if scipy not available
-        smoothed_density = electron_density
-    
-    # Repulsion potential proportional to electron density
-    repulsion_potential = repulsion_strength * smoothed_density
-    return repulsion_potential
-
-# Create electrons in different atomic orbitals with stable distances
 def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_numbers):
-    """Create electron in specific atomic orbital with quantum numbers (n, l, m)."""
-    n, l, m = quantum_numbers  # principal, angular momentum, magnetic quantum numbers
-    
-    # Convert to polar coordinates relative to nucleus
+    n, l, m = quantum_numbers
     r = np.sqrt((x - center_x)**2 + (y - center_y)**2)
     theta = np.arctan2(y - center_y, x - center_x)
-    
-    # Radial wavefunction (simplified hydrogen-like)
     bohr_radius = orbital_radius
-    radial_part = np.exp(-r / (n * bohr_radius)) * (r / bohr_radius)**(l)
-    
-    # Angular momentum part (orbital shape)
+    radial_part = np.exp(-r / (n * bohr_radius)) * (r / bohr_radius)**l
     angular_part = np.exp(1j * m * theta)
-    
-    # Gaussian envelope for stability
     sigma = n * bohr_radius * 0.8
     envelope = np.exp(-((r - n * bohr_radius)**2) / (2 * sigma**2))
-    
     psi = radial_part * angular_part * envelope
     return psi.astype(np.complex128)
 
-# Create single electron in hydrogen atom (1s ground state)
-# Hydrogen atom has only one electron
-electron1 = create_orbital_electron(X, Y, center_x, center_y, 
-                                  orbital_radius=1, quantum_numbers=(1, 0, 0))  # 1s orbital
+def create_nucleus_potential(x, y, nucleus_x, nucleus_y, charge=1):
+    r = np.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2)
+    r = np.maximum(r, 1.0)
+    potential_strength = 0.2
+    return -potential_strength * charge / r
 
-# Normalize initial wavefunction
-initial_norm = np.linalg.norm(electron1)
-if initial_norm > 0:
-    electron1 = electron1 / initial_norm
+def add_noise(psi, noise_level=0.001):
+    noise = (np.random.rand(*psi.shape) - 0.5) * noise_level
+    return psi + noise.astype(np.complex128)
 
-# Single electron wavefunction for hydrogen atom
-psi_t = electron1 
+def normalize_wavefunction(psi):
+    norm = np.sqrt(np.sum(np.abs(psi)**2))
+    if norm > 0:
+        return psi / norm
+    return psi
 
-# --- Quantum gate functions (renamed for clarity) ---
-def local_phase_kick(amp): return amp * (1 + 1j) / np.sqrt(2)  # was hadamard
-def amplitude_flip(amp): return -amp  # was pauli_x  
-def phase_rotation(amp): return amp * np.exp(1j * pi / 4)  # was t_gate
+def propagate_wave_with_potential(psi, potential, dt=DT):
+    potential_phase = np.exp(-1j * dt * potential / 2)
+    psi = psi * potential_phase
+    psi_hat = np.fft.fft2(psi)
+    kx = np.fft.fftfreq(psi.shape[1]) * 2 * np.pi
+    ky = np.fft.fftfreq(psi.shape[0]) * 2 * np.pi
+    KX, KY = np.meshgrid(kx, ky)
+    kinetic_phase = np.exp(-1j * dt * (KX**2 + KY**2) / 2)
+    psi_hat *= kinetic_phase
+    psi = np.fft.ifft2(psi_hat)
+    psi = psi * potential_phase
+    return psi
 
-# --- Patch-based gate storage ---
+def apply_spatial_gates_from_patch(psi, gate_patch_map):
+    updated = psi.copy()
+    for y in range(GRID_HEIGHT):
+        for x in range(GRID_WIDTH):
+            if abs(psi[y, x]) > 1e-3:
+                for i in range(MAX_GATES_PER_CELL):
+                    gate_fn = gate_patch_map[y, x, i]
+                    if gate_fn is not None:
+                        updated[y, x] = gate_fn(updated[y, x])
+    return updated
+
+def center_wave(psi):
+    global smooth_cy, smooth_cx, smoothing_factor
+    prob = np.abs(psi)**2
+    total = np.sum(prob)
+    if total == 0:
+        return psi
+    y_idx, x_idx = np.indices(prob.shape)
+    cy = np.sum(y_idx * prob) / total
+    cx = np.sum(x_idx * prob) / total
+    smooth_cy = smooth_cy + (cy - smooth_cy) / smoothing_factor
+    smooth_cx = smooth_cx + (cx - smooth_cx) / smoothing_factor
+    shift_y = int(np.round((SIZE // 2) - smooth_cy))
+    shift_x = int(np.round((SIZE // 2) - smooth_cx))
+    return np.roll(np.roll(psi, shift_y, axis=0), shift_x, axis=1)
+
+# Adjust reverse Gaussian blur to increase the blur effect
+# Ensure 50% of the image is entirely blurred out
+
+def reverse_gaussian_blur(psi, center_x, center_y):
+    """Apply an optimized reverse Gaussian blur with stronger blur for 50% of the image."""
+    r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+    max_sigma = SIZE // 2  # Maximum blur for 50% of the image
+    min_sigma = 1          # Minimum blur at the center
+    sigma_map = min_sigma + (max_sigma - min_sigma) * (r / np.max(r))
+
+    # Precompute a spatially varying kernel
+    from scipy.ndimage import gaussian_filter
+    blurred_psi = gaussian_filter(psi, sigma=max_sigma)
+
+    # Blend the original and blurred wavefunction based on sigma_map
+    blend_factor = (sigma_map - min_sigma) / (max_sigma - min_sigma)
+    optimized_psi = psi * (1 - blend_factor) + blurred_psi * blend_factor
+
+    return optimized_psi
+
+# Function to apply a low-pass filter
+def apply_low_pass_filter(psi, cutoff_frequency):
+    """Apply a low-pass filter to the wavefunction to remove high-frequency components."""
+    psi_hat = np.fft.fft2(psi)
+    kx = np.fft.fftfreq(psi.shape[1]) * 2 * np.pi
+    ky = np.fft.fftfreq(psi.shape[0]) * 2 * np.pi
+    KX, KY = np.meshgrid(kx, ky)
+    k_squared = KX**2 + KY**2
+
+    # Create a low-pass filter mask
+    low_pass_mask = k_squared <= (cutoff_frequency**2)
+    psi_hat_filtered = psi_hat * low_pass_mask
+
+    # Transform back to spatial domain
+    psi_filtered = np.fft.ifft2(psi_hat_filtered)
+    return psi_filtered
+
+# Initial conditions
+nucleus_x, nucleus_y = center_x, center_y
+nuclear_potential = create_nucleus_potential(X, Y, nucleus_x, nucleus_y, charge=1)
+center_x_offset = int(center_x * 1.1)
+center_y_offset = int(center_y * 1.1)
+electron1 = create_orbital_electron(X, Y, center_x_offset, center_y_offset, orbital_radius=25, quantum_numbers=(1, 0, 0))
+psi_t = add_noise(electron1, noise_level=0.001)
+psi_t = normalize_wavefunction(psi_t)
+momentum_x, momentum_y = 0.03, 0.01
+momentum_phase = np.exp(1j * (momentum_x * X + momentum_y * Y))
+psi_t *= momentum_phase
+
+# Apply the updated reverse Gaussian blur to the initial wavefunction
+psi_t = reverse_gaussian_blur(psi_t, center_x, center_y)
+
+# Apply a low-pass filter to the initial wavefunction
+cutoff_frequency = 0.1  # Adjust cutoff frequency as needed
+psi_t = apply_low_pass_filter(psi_t, cutoff_frequency)
+
+# Quantum gate infrastructure (optional but present)
+def hadamard(amp): return amp * (1 + 1j) / np.sqrt(2)
+def pauli_x(amp): return -amp
+def t_gate(amp): return amp * np.exp(1j * pi / 4)
 gate_patch_map = np.full((GRID_HEIGHT, GRID_WIDTH, MAX_GATES_PER_CELL), None, dtype=object)
 
 def add_gate_patch(gate_patch_map, center_y, center_x, gate_fn):
@@ -112,132 +157,37 @@ def add_gate_patch(gate_patch_map, center_y, center_x, gate_fn):
                             gate_patch_map[y, x, i] = gate_fn
                             break
 
-def apply_spatial_gates_from_patch(psi, gate_patch_map):
-    updated = psi.copy()
-    for y in range(GRID_HEIGHT):
-        for x in range(GRID_WIDTH):
-            if abs(psi[y, x]) > 1e-3:
-                for i in range(MAX_GATES_PER_CELL):
-                    gate_fn = gate_patch_map[y, x, i]
-                    if gate_fn is not None:
-                        updated[y, x] = gate_fn(updated[y, x])
-    return updated
-
-# --- Absorbing boundary mask ---
-def create_absorbing_mask(size, edge_width=20):
-    """Create absorbing boundary mask to prevent reflections."""
-    mask = np.ones((size, size))
-    for i in range(edge_width):
-        fade = np.cos((i / edge_width) * pi / 2) ** 2
-        mask[i, :] *= fade
-        mask[-(i + 1), :] *= fade
-        mask[:, i] *= fade
-        mask[:, -(i + 1)] *= fade
-    return mask
-
-# Create absorbing boundary mask
-absorbing_mask = create_absorbing_mask(SIZE)
-
-# --- Split-Step Fourier propagation with nuclear potential ---
-def propagate_wave_with_potential(psi, potential, dt=DT):
-    """Propagate wave using split-step method with potential energy."""
-    # Apply potential energy operator for half time step
-    potential_phase = np.exp(-1j * dt * potential / 2)
-    psi = psi * potential_phase
-    
-    # Apply kinetic energy operator (Fourier space)
-    psi_hat = np.fft.fft2(psi)
-    # Fix FFT frequency scaling for proper kinetic energy
-    kx = np.fft.fftfreq(psi.shape[1], d=1.0 / psi.shape[1]) * 2 * np.pi
-    ky = np.fft.fftfreq(psi.shape[0], d=1.0 / psi.shape[0]) * 2 * np.pi
-    KX, KY = np.meshgrid(kx, ky)
-    kinetic_phase = np.exp(-1j * dt * (KX**2 + KY**2) / 2)  # Kinetic energy operator
-    psi_hat *= kinetic_phase
-    psi = np.fft.ifft2(psi_hat)
-    
-    # Apply potential energy operator for second half time step
-    psi = psi * potential_phase
-    
-    # Apply absorbing boundary
-    psi = psi * absorbing_mask
-    
-    # Normalize wavefunction to prevent numerical drift
-    norm = np.linalg.norm(psi)
-    if norm > 0:
-        psi = psi / norm
-    
-    return psi
-
-def propagate_wave(psi, dt=DT):
-    """Legacy function for backward compatibility."""
-    return propagate_wave_with_potential(psi, nuclear_potential, dt)
-
-# --- Center-of-mass tracker with smoothing ---
-# Global variables for smoothing
+# Centering state
 smooth_cy = SIZE // 2
 smooth_cx = SIZE // 2
 smoothing_factor = 2000
 
-def center_wave(psi):
-    global smooth_cy, smooth_cx, smoothing_factor
-    prob = np.abs(psi)**2  # Use the last frame's probability density
-    total = np.sum(prob)
-    if total == 0:
-        return psi  # nothing to center
-    
-    y_idx, x_idx = np.indices(prob.shape)
-    cy = np.sum(y_idx * prob) / total
-    cx = np.sum(x_idx * prob) / total
-    
-    # Apply exponential smoothing
-    smooth_cy = smooth_cy + (cy - smooth_cy) / smoothing_factor
-    smooth_cx = smooth_cx + (cx - smooth_cx) / smoothing_factor
-    
-    # Calculate shifts using smoothed center
-    shift_y = int(np.round((SIZE // 2) - smooth_cy))
-    shift_x = int(np.round((SIZE // 2) - smooth_cx))
-    
-    return np.roll(np.roll(psi, shift_y, axis=0), shift_x, axis=1)
-
-# --- Run atomic simulation ---
+# Simulation loop
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
 cur = psi_t.copy()
-
 print("Simulating hydrogen atom with single electron...")
 print(f"Nuclear position: ({nucleus_x}, {nucleus_y})")
 print(f"Time steps: {TIME_STEPS}, dt: {DT}")
-print(f"Initial wavefunction norm: {np.linalg.norm(psi_t):.6f}")
-print("Improvements applied:")
-print("  ✓ Absorbing boundary conditions")
-print("  ✓ Fixed FFT frequency scaling")
-print("  ✓ Wavefunction normalization")
-print("  ✓ Renamed quantum gate functions for clarity")
 
 for step in range(TIME_STEPS):
     if step % 50 == 0:
-        norm = np.linalg.norm(cur)
-        print(f"Step {step}/{TIME_STEPS}, norm: {norm:.6f}")
-    
-    # For hydrogen, only nuclear attraction (no electron-electron repulsion)
-    total_potential = nuclear_potential
-    
-    cur = propagate_wave_with_potential(cur, total_potential)
-    cur = center_wave(cur)  # center using COM
+        print(f"Step {step}/{TIME_STEPS}")
+
+    cur = propagate_wave_with_potential(cur, nuclear_potential)
+    cur = center_wave(cur)
     cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
 
     region = cur[SIZE//4:3*SIZE//4, SIZE//4:3*SIZE//4]
     frames_real.append(np.real(region))
     frames_imag.append(np.imag(region))
     frames_phase.append(np.angle(region))
-    
-    # Enhanced probability density for better visualization
+
     prob_density = np.abs(region)**2
-    # Normalize for consistent visualization
     if np.max(prob_density) > 0:
         prob_density = prob_density / np.max(prob_density)
     frames_prob.append(prob_density)
 
-# --- Create atomic simulation video ---
+# Video output
 video_file = "hydrogen_atom_simulation.mkv"
 print(f"Creating video: {video_file}")
 create_video(
@@ -246,7 +196,7 @@ create_video(
     frames_imag,
     frames_phase,
     frames_prob,
-    fps=30,  # Slightly higher fps for smoother orbital motion
+    fps=30,
     output_file=video_file
 )
 

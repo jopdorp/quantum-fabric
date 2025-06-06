@@ -327,8 +327,12 @@ for step in range(TIME_STEPS):
         tween_step = 0
 
     # Add mean-field repulsion dynamically
-    V1 = nuclear_potential1 + add_mean_field_coulomb_repulsion(psi2)
-    V2 = nuclear_potential2 + add_mean_field_coulomb_repulsion(psi1)
+    # Combined nuclear potential for both electrons - each electron is attracted to both nuclei
+    combined_nuclear_potential = nuclear_potential1 + nuclear_potential2
+    
+    # Each electron experiences both nuclei attraction and the other electron's repulsion
+    V1 = combined_nuclear_potential + add_mean_field_coulomb_repulsion(psi2)
+    V2 = combined_nuclear_potential + add_mean_field_coulomb_repulsion(psi1)
 
     psi1 = propagate_wave_with_potential(psi1, V1)
     psi2 = propagate_wave_with_potential(psi2, V2)

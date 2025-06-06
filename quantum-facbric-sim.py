@@ -9,26 +9,29 @@ from video_utils import create_video, open_video
 SIZE = 256
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = SIZE * 3
+TIME_STEPS = SIZE * 6
 DT = 2
 SIGMA_AMPLIFIER = 0.4
-POTENTIAL_STRENTGH = 0.2  # Adjusted for stability
+POTENTIAL_STRENTGH = 0.4  # Adjusted for stability
 MAX_GATES_PER_CELL = 4
 
 # --- Initial world state
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
 center_x, center_y = SIZE // 2, SIZE // 2
 
-def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_numbers):
+def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_numbers, scale=4.0):
     n, l, m = quantum_numbers
-    r = np.sqrt((x - center_x)**2 + (y - center_y)**2)
-    theta = np.arctan2(y - center_y, x - center_x)
+    # Scale the spatial coordinates
+    x_scaled = x / scale
+    y_scaled = y / scale
+    center_x_scaled = center_x / scale
+    center_y_scaled = center_y / scale
+
+    r = np.sqrt((x_scaled - center_x_scaled)**2 + (y_scaled - center_y_scaled)**2)
+    theta = np.arctan2(y_scaled - center_y_scaled, x_scaled - center_x_scaled)
     bohr_radius = orbital_radius
     radial_part = np.exp(-r / (n * bohr_radius)) * (r / bohr_radius)**l
     angular_part = np.exp(1j * m * theta)
-    # Calculate the width of the Gaussian envelope
-    # The width is related to the principal quantum number n and Bohr radius
-    # The factor 0.8 is an empirical adjustment to control the spread of the wavefunction
     n = max(n, 1)  # Ensure n is at least 1
     sigma = n * bohr_radius * SIGMA_AMPLIFIER
 
@@ -131,15 +134,26 @@ def apply_low_pass_filter(psi, cutoff_frequency):
     psi_filtered = np.fft.ifft2(psi_hat_filtered)
     return psi_filtered
 
+# Function to apply a large blur to the edges of the world
+def apply_edge_blur(psi, blur_factor=SIZE // 2):
+    """Apply a large Gaussian blur to the edges of the world."""
+    r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+    edge_blur = np.exp(-r**2 / (2 * blur_factor**2))
+    return psi * edge_blur
+
 # Initial conditions
 nucleus_x, nucleus_y = center_x, center_y
 nuclear_potential = create_nucleus_potential(X, Y, nucleus_x, nucleus_y, charge=1)
 center_x_offset = int(center_x * 1.1)
 center_y_offset = int(center_y * 1.1)
+
+# Create the initial wavefunction
 electron1 = create_orbital_electron(X, Y, center_x_offset, center_y_offset, orbital_radius=25, quantum_numbers=(1, 0, 0))
 psi_t = add_noise(electron1, noise_level=0.001)
 psi_t = normalize_wavefunction(psi_t)
-momentum_x, momentum_y = 0.03, 0.01
+
+# Add momentum to the initial wavefunction
+momentum_x, momentum_y = 0.03, 0.01  # Momentum in x and y directions
 momentum_phase = np.exp(1j * (momentum_x * X + momentum_y * Y))
 psi_t *= momentum_phase
 
@@ -184,11 +198,15 @@ stable_states = [
 def tween_wavefunctions(psi_start, psi_end, alpha):
     return (1 - alpha) * psi_start + alpha * psi_end
 
+# Timing parameters
+stay_duration = 60  # Number of time steps to stay in a state (2 seconds at 30 FPS)
+tween_duration = 15  # Number of time steps for a 0.5-second tween (at 30 FPS)
+tween_step = 0
+stay_step = 0
+
 # Initialize variables for tweening
 current_state_index = 0
 next_state_index = 1
-tween_duration = 30  # Number of time steps for a 1-second tween (assuming 30 FPS)
-tween_step = 0
 
 # Simulation loop
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
@@ -201,15 +219,21 @@ for step in range(TIME_STEPS):
     if step % 50 == 0:
         print(f"Step {step}/{TIME_STEPS}")
 
-    # Tweening logic
-    if tween_step < tween_duration:
-        # Get the current and next stable states
+    if stay_step < stay_duration:
+        # Stay in the current state
+        if stay_step == 0:  # Only create the wavefunction once per state
+            current_state = stable_states[current_state_index]
+            cur = create_orbital_electron(X, Y, center_x, center_y, current_state[3], current_state[:3], scale=4.0)
+            cur = normalize_wavefunction(cur)
+        stay_step += 1
+    elif tween_step < tween_duration:
+        # Tweening logic
         current_state = stable_states[current_state_index]
         next_state = stable_states[next_state_index]
 
         # Generate wavefunctions for the current and next states
-        psi_current = create_orbital_electron(X, Y, center_x, center_y, current_state[3], current_state[:3])
-        psi_next = create_orbital_electron(X, Y, center_x, center_y, next_state[3], next_state[:3])
+        psi_current = create_orbital_electron(X, Y, center_x, center_y, current_state[3], current_state[:3], scale=4.0)
+        psi_next = create_orbital_electron(X, Y, center_x, center_y, next_state[3], next_state[:3], scale=4.0)
 
         # Interpolate between the two states
         alpha = tween_step / tween_duration
@@ -223,6 +247,7 @@ for step in range(TIME_STEPS):
         # Move to the next stable state
         current_state_index = next_state_index
         next_state_index = (next_state_index + 1) % len(stable_states)
+        stay_step = 0
         tween_step = 0
 
     # Propagate the wavefunction
@@ -230,8 +255,11 @@ for step in range(TIME_STEPS):
     cur = center_wave(cur)
     cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
 
+    # Apply edge blur
+    cur = apply_edge_blur(cur)
+
     # Record frames for visualization
-    region = cur[SIZE//4:3*SIZE//4, SIZE//4:3*SIZE//4]
+    region = cur  # Visualize the entire grid
     frames_real.append(np.real(region))
     frames_imag.append(np.imag(region))
     frames_phase.append(np.angle(region))

@@ -10,10 +10,12 @@ SIZE = 256
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
 TIME_STEPS = SIZE * 3
-MAX_GATES_PER_CELL = 4
 DT = 2
+SIGMA_AMPLIFIER = 0.4
+POTENTIAL_STRENTGH = 0.2  # Adjusted for stability
+MAX_GATES_PER_CELL = 4
 
-# --- Initial wave packet: Gaussian with momentum ---
+# --- Initial world state
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
 center_x, center_y = SIZE // 2, SIZE // 2
 
@@ -24,7 +26,12 @@ def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_nu
     bohr_radius = orbital_radius
     radial_part = np.exp(-r / (n * bohr_radius)) * (r / bohr_radius)**l
     angular_part = np.exp(1j * m * theta)
-    sigma = n * bohr_radius * 0.8
+    # Calculate the width of the Gaussian envelope
+    # The width is related to the principal quantum number n and Bohr radius
+    # The factor 0.8 is an empirical adjustment to control the spread of the wavefunction
+    n = max(n, 1)  # Ensure n is at least 1
+    sigma = n * bohr_radius * SIGMA_AMPLIFIER
+
     envelope = np.exp(-((r - n * bohr_radius)**2) / (2 * sigma**2))
     psi = radial_part * angular_part * envelope
     return psi.astype(np.complex128)
@@ -32,7 +39,10 @@ def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_nu
 def create_nucleus_potential(x, y, nucleus_x, nucleus_y, charge=1):
     r = np.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2)
     r = np.maximum(r, 1.0)
-    potential_strength = 0.2
+    # Coulomb potential: V = -k*Z/r (attractive for electrons)
+    # Adjust potential strength for stability
+    # This value can be tuned to control the strength of the potential
+    potential_strength = POTENTIAL_STRENTGH
     return -potential_strength * charge / r
 
 def add_noise(psi, noise_level=0.001):

@@ -21,8 +21,8 @@ MAX_GATES_PER_CELL = 4
 SCALE = 9000.0 # Previously 400.0
 # INITIAL_MOMENTUM_X = 3000.3 # Replaced by KX
 # INITIAL_MOMENTUM_Y = 1000    # Replaced by KY
-KX = 2 * np.pi / SIZE * 5  # Wavevector component for x-direction
-KY = 2 * np.pi / SIZE * 2  # Wavevector component for y-direction
+KX = 2 * np.pi / SIZE * 1  # Wavevector component for x-direction (reduced from 5 to 1)
+KY = 2 * np.pi / SIZE * 1  # Wavevector component for y-direction (reduced from 2 to 1)
 
 # --- Initial world state
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
@@ -215,8 +215,9 @@ nuclear_potential2 = create_nucleus_potential(X, Y, nucleus2_x, nucleus2_y, char
 psi1 = hydrogen_eigenstate_2d(1, 0, X, Y, nucleus1_x, nucleus1_y, scale=SCALE)
 psi2 = hydrogen_eigenstate_2d(1, 0, X, Y, nucleus2_x, nucleus2_y, scale=SCALE)
 
-momentum1 = np.exp(1j * (KX * X))
-momentum2 = np.exp(-1j * (KX * X))
+# Apply asymmetric momentum to reduce perfect phase cancellation
+momentum1 = np.exp(1j * (KX * X + KY * Y))
+momentum2 = np.exp(-1j * (0.8 * KX * X - 0.6 * KY * Y))
 psi1 *= momentum1
 psi2 *= momentum2
 
@@ -344,8 +345,9 @@ for step in range(TIME_STEPS):
     frames_real.append(np.real(region))
     frames_imag.append(np.imag(region))
 
-    # Record phase consistently
-    frames_phase.append(np.angle(region))
+    # Record phase with smooth blurring to prevent sharp transitions
+    blurred_region = gaussian_filter(region, sigma=1)
+    frames_phase.append(np.angle(blurred_region))
 
     prob_density = np.abs(region)**2
     if np.max(prob_density) > 0:

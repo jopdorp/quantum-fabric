@@ -277,28 +277,6 @@ cutoff_frequency = 0.1  # Adjust as needed
 psi1 = apply_low_pass_filter(psi1, cutoff_frequency)
 psi2 = apply_low_pass_filter(psi2, cutoff_frequency)
 
-# Quantum gate infrastructure (optional)
-def hadamard(amp): return amp * (1 + 1j) / np.sqrt(2)
-def pauli_x(amp): return -amp
-def t_gate(amp): return amp * np.exp(1j * pi / 4)
-gate_patch_map = np.full((GRID_HEIGHT, GRID_WIDTH, MAX_GATES_PER_CELL), None, dtype=object)
-
-def add_gate_patch(gate_patch_map, center_y, center_x, gate_fn):
-    radius = 2
-    for y in range(center_y - radius, center_y + radius + 1):
-        for x in range(center_x - radius, center_x + radius + 1):
-            if 0 <= y < GRID_HEIGHT and 0 <= x < GRID_WIDTH:
-                if (x - center_x)**2 + (y - center_y)**2 <= radius**2:
-                    for i in range(MAX_GATES_PER_CELL):
-                        if gate_patch_map[y, x, i] is None:
-                            gate_patch_map[y, x, i] = gate_fn
-                            break
-
-# Centering state (not currently used)
-smooth_cy = SIZE // 2
-smooth_cx = SIZE // 2
-smoothing_factor = 2000
-
 # Define stable states for hydrogen (quantum numbers: n, m)
 stable_states = [
     (1, 0),   # Ground state
@@ -306,9 +284,6 @@ stable_states = [
     (3, 2),   # Excited state 2
     (4, 3)    # Excited state 3
 ]
-
-def tween_wavefunctions(psi_start, psi_end, alpha):
-    return (1 - alpha) * psi_start + alpha * psi_end
 
 # Timing parameters for tweening
 stay_duration = 600000000  # Number of time steps to stay in a state
@@ -329,39 +304,39 @@ for step in range(TIME_STEPS):
         print(f"Step {step}/{TIME_STEPS}")
 
     # Hydrogen orbital tweening (optional visualization step)
-    if stay_step < stay_duration:
-        if stay_step == 0:
-            current_state = stable_states[current_state_index]
-            cur = hydrogen_eigenstate_2d(
-                current_state[0], current_state[1], X, Y,
-                int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
-            )
-            cur = normalize_wavefunction(cur)
-        stay_step += 1
-    elif tween_step < tween_duration:
-        current_state = stable_states[current_state_index]
-        next_state = stable_states[next_state_index]
-        psi_current = hydrogen_eigenstate_2d(
-            current_state[0], current_state[1], X, Y,
-            int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
-        )
-        psi_next = hydrogen_eigenstate_2d(
-            next_state[0], next_state[1], X, Y,
-            int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
-        )
-        alpha = tween_step / tween_duration
-        cur = tween_wavefunctions(psi_current, psi_next, alpha)
-        momentum_x = KX * 0.1 * alpha
-        momentum_y = KY * 0.1 * alpha
-        momentum_phase = np.exp(1j * (momentum_x * X + momentum_y * Y))
-        cur *= momentum_phase
-        cur = normalize_wavefunction(cur)
-        tween_step += 1
-    else:
-        current_state_index = next_state_index
-        next_state_index = (next_state_index + 1) % len(stable_states)
-        stay_step = 0
-        tween_step = 0
+    # if stay_step < stay_duration:
+    # if stay_step == 0:
+    #     current_state = stable_states[current_state_index]
+    #     cur = hydrogen_eigenstate_2d(
+    #         current_state[0], current_state[1], X, Y,
+    #         int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
+    #     )
+    #     cur = normalize_wavefunction(cur)
+    # stay_step += 1
+    # elif tween_step < tween_duration:
+    #     current_state = stable_states[current_state_index]
+    #     next_state = stable_states[next_state_index]
+    #     psi_current = hydrogen_eigenstate_2d(
+    #         current_state[0], current_state[1], X, Y,
+    #         int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
+    #     )
+    #     psi_next = hydrogen_eigenstate_2d(
+    #         next_state[0], next_state[1], X, Y,
+    #         int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
+    #     )
+    #     alpha = tween_step / tween_duration
+    #     cur = tween_wavefunctions(psi_current, psi_next, alpha)
+    #     momentum_x = KX * 0.1 * alpha
+    #     momentum_y = KY * 0.1 * alpha
+    #     momentum_phase = np.exp(1j * (momentum_x * X + momentum_y * Y))
+    #     cur *= momentum_phase
+    #     cur = normalize_wavefunction(cur)
+    #     tween_step += 1
+    # else:
+    current_state_index = next_state_index
+    next_state_index = (next_state_index + 1) % len(stable_states)
+    stay_step = 0
+    tween_step = 0
 
     # --- Dynamic Proton Updates ---
     density1 = np.abs(psi1)**2
@@ -410,7 +385,7 @@ for step in range(TIME_STEPS):
     # cur = center_wave(cur)
     # cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
     # cur = apply_edge_blur(cur)
-    cur = apply_absorption_edge_low_pass(cur, cutoff_frequency=0.1)
+    # cur = apply_absorption_edge_low_pass(cur, cutoff_frequency=0.1)
 
     # Record frames for visualization
     region = psi1 + psi2  # Display combined electron wavefunctions

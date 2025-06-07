@@ -8,7 +8,7 @@ from scipy.special import genlaguerre
 from scipy.ndimage import gaussian_filter
 
 # Grid and simulation parameters
-SIZE = 256
+SIZE = 512
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
 TIME_STEPS = SIZE * 6
@@ -18,7 +18,7 @@ POTENTIAL_STRENGTH = 1.0  # Increased potential strength and corrected typo
 MAX_GATES_PER_CELL = 4
 
 # Add global variables for configuration
-SCALE = 3000.0  # Previously 400.0
+SCALE = 30000.0  # Previously 400.0
 KX = 2 * np.pi / SIZE * 1  # Wavevector component for x-direction
 KY = 2 * np.pi / SIZE * 1  # Wavevector component for y-direction
 
@@ -196,7 +196,7 @@ nuclear_potential1 = create_nucleus_potential(X, Y, nucleus1_x, nucleus1_y, char
 nuclear_potential2 = create_nucleus_potential(X, Y, nucleus2_x, nucleus2_y, charge=1)
 
 # Two electrons with excited states having angular momentum (swirling orbitals)
-psi1 = hydrogen_eigenstate_2d(1, 0, X, Y, nucleus1_x, nucleus1_y, scale=SCALE)
+psi1 = hydrogen_eigenstate_2d(3, +2, X, Y, nucleus1_x, nucleus1_y, scale=SCALE)
 psi2 = hydrogen_eigenstate_2d(3, -2, X, Y, nucleus2_x, nucleus2_y, scale=SCALE)
 
 # Apply phase vortex to enhance rotation
@@ -362,6 +362,12 @@ for step in range(TIME_STEPS):
     # Propagate electrons
     psi1 = propagate_wave_with_potential(psi1, V1)
     psi2 = propagate_wave_with_potential(psi2, V2)
+    
+    # Apply a small low-pass filter at each step to smooth the wavefunctions
+    # This helps reduce numerical artifacts and stabilize the simulation
+    slight_cutoff_frequency = 0.8  # Higher than initial cutoff, just for light smoothing
+    psi1 = apply_low_pass_filter(psi1, slight_cutoff_frequency)
+    psi2 = apply_low_pass_filter(psi2, slight_cutoff_frequency)
 
     # Optional spatial gates or blurs (commented out)
     # cur = center_wave(cur)

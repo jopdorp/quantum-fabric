@@ -8,46 +8,47 @@ from scipy.special import genlaguerre
 from scipy.ndimage import gaussian_filter
 
 # Grid and simulation parameters
-SIZE = 512
+SIZE = 350
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = SIZE * 6
-DT = 10  # Reduced DT for richer time evolution
-SIGMA_AMPLIFIER = 0.8
-POTENTIAL_STRENGTH = 1.0  # Increased potential strength and corrected typo
-MAX_GATES_PER_CELL = 4
+TIME_STEPS = SIZE
+TIME_DELTA = 8  # Reduced DT for richer time evolution
+POTENTIAL_STRENGTH = 1.0  # Coulomb strength
+MAX_GATES_PER_CELL = 4  # Quantum gates per cell
 
-# Add global variables for configuration
-SCALE = 30000.0  # Previously 400.0
-KX = 2 * np.pi / SIZE * 1  # Wavevector component for x-direction
-KY = 2 * np.pi / SIZE * 1  # Wavevector component for y-direction
+
+ZOOM = 10.0       # >1 zooms out
+BASE_SCALE = 400.0
+SCALE = BASE_SCALE / ZOOM            # smaller SCALE → larger r values → zoom out
+BASE_SIGMA = 0.01
+SIGMA_AMPLIFIER = BASE_SIGMA / ZOOM  # smaller sigma → envelope decays slower in grid units
+
+KX = 0.5 * np.pi / SIZE                  # momentum terms unaffected by zoom
+KY = 0.3 * np.pi / SIZE
+
+# Physical constants and parameters
+COULOMB_STRENGTH = 1.0
+NUCLEAR_CORE_RADIUS = 2.0
+NUCLEAR_REPULSION_STRENGTH = 0.5
+STRONG_FORCE_STRENGTH = 0.1
+STRONG_FORCE_RANGE = 3.0
+ELECTRON_REPULSION_STRENGTH = 0.08
 
 # --- Initial world state
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
-center_x, center_y = SIZE // 2, SIZE // 2
+center_x, center_y = SIZE//2, SIZE//2
 
-def hydrogen_eigenstate_2d(n, m, x, y, center_x, center_y, scale=400.0):
-    """2D hydrogen-like eigenstate using Laguerre polynomials (approximation)."""
-    assert n > abs(m) >= 0
-    x_scaled = (x - center_x) / scale
-    y_scaled = (y - center_y) / scale
-    r = np.sqrt(x_scaled**2 + y_scaled**2)
-    theta = np.arctan2(y_scaled, x_scaled)
-
-    # Define radial quantum number
+def hydrogen_eigenstate_2d(n, m, x, y, cx, cy, scale=SCALE, sigma_amp=SIGMA_AMPLIFIER):
+    """2D hydrogen eigenstate with Gaussian envelope."""
+    xs, ys = (x - cx)/scale, (y - cy)/scale
+    r = np.sqrt(xs**2 + ys**2)
+    theta = np.arctan2(ys, xs)
+    rho = 2*r/n
     p = n - abs(m) - 1
-    rho = 2 * r / n
-
-    # Normalization constant (approximate for 2D hydrogen-like system)
-    norm = np.sqrt((2 / n)**2 * factorial(p) / (pi * factorial(p + abs(m))))
-
-    # Radial part with generalized Laguerre polynomial
-    R = rho**abs(m) * np.exp(-rho / 2) * genlaguerre(p, 2 * abs(m))(rho)
-
-    # Angular part
-    angular = np.exp(1j * m * theta)
-
-    return (norm * R * angular).astype(np.complex128)
+    norm = np.sqrt((2/n)**2 * factorial(p) / (pi*factorial(p+abs(m))))
+    R = rho**abs(m) * np.exp(-rho/2) * genlaguerre(p,2*abs(m))(rho)
+    envelope = np.exp(-r**2/(2*sigma_amp**2))
+    return (norm*R*np.exp(1j*m*theta)*envelope).astype(np.complex128)
 
 def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_numbers, scale=None):
     if scale is None:
@@ -71,10 +72,18 @@ def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_nu
     return psi.astype(np.complex128)
 
 def create_nucleus_potential(x, y, nucleus_x, nucleus_y, charge=1):
+    """Create a more realistic nucleus potential with short-range repulsion."""
     r = np.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2)
-    r = np.maximum(r, 1.0)
-    # Coulomb potential: V = -k*Z/r (attractive for electrons)
-    return -POTENTIAL_STRENGTH * charge / r
+    r = np.maximum(r, 0.1)  # Smaller minimum to allow closer approach
+    
+    # Long-range Coulomb attraction: V = -k*Z/r (attractive for electrons)
+    coulomb_attraction = -POTENTIAL_STRENGTH * charge / r
+    
+    # Short-range repulsion to prevent collapse into nucleus (models quantum effects)
+    # This represents the Pauli exclusion principle and quantum uncertainty
+    nuclear_repulsion = NUCLEAR_REPULSION_STRENGTH * np.exp(-r / NUCLEAR_CORE_RADIUS) / (r + 0.1)
+    
+    return coulomb_attraction + nuclear_repulsion
 
 def add_noise(psi, noise_level=0.001):
     noise = (np.random.rand(*psi.shape) - 0.5) * noise_level
@@ -92,7 +101,37 @@ def add_mean_field_coulomb_repulsion(source_psi, strength=0.05, sigma=5):
     repulsion = gaussian_filter(charge_density, sigma=sigma)
     return strength * repulsion
 
-def propagate_wave_with_potential(psi, potential, dt=DT):
+def compute_nuclear_force(nucleus1_pos, nucleus2_pos):
+    """Compute forces between two nuclei including Coulomb repulsion and nuclear binding."""
+    diff = nucleus2_pos - nucleus1_pos
+    r = np.linalg.norm(diff)
+    r = max(r, 0.5)  # Prevent singularity
+    
+    # Coulomb repulsion between protons: F = k*q1*q2/r^2
+    coulomb_force = COULOMB_STRENGTH * diff / r**3
+    
+    # Strong nuclear force (attractive at very short range, models neutron-proton binding)
+    if r < STRONG_FORCE_RANGE:
+        # Exponentially decaying attractive force
+        nuclear_attraction = -STRONG_FORCE_STRENGTH * np.exp(-r / STRONG_FORCE_RANGE) * diff / r
+    else:
+        nuclear_attraction = np.zeros(2)
+    
+    return coulomb_force + nuclear_attraction
+
+def enhanced_electron_electron_repulsion(psi1, psi2):
+    """Enhanced electron-electron repulsion with better physical modeling."""
+    density1 = np.abs(psi1)**2
+    density2 = np.abs(psi2)**2
+    
+    # Create repulsion potential based on both electron densities
+    # Use different sigma values for short and long range interactions
+    short_range_repulsion = gaussian_filter(density2, sigma=2) * ELECTRON_REPULSION_STRENGTH * 2
+    long_range_repulsion = gaussian_filter(density2, sigma=8) * ELECTRON_REPULSION_STRENGTH * 0.5
+    
+    return short_range_repulsion + long_range_repulsion
+
+def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA):
     potential_phase = np.exp(-1j * dt * potential / 2)
     psi = psi * potential_phase
     psi_hat = np.fft.fft2(psi)
@@ -188,8 +227,8 @@ def apply_edge_blur(psi, blur_factor=SIZE // 2):
 
 # Initial conditions
 # Define two hydrogen nuclei (fixed starting positions)
-nucleus1_x, nucleus1_y = center_x - SIZE // 6, center_y
-nucleus2_x, nucleus2_y = center_x + SIZE // 6, center_y
+nucleus1_x, nucleus1_y = center_x - SIZE // (ZOOM * 2), center_y
+nucleus2_x, nucleus2_y = center_x + SIZE // (ZOOM * 2), center_y
 
 # Two nuclear potentials (will be overwritten dynamically each step)
 nuclear_potential1 = create_nucleus_potential(X, Y, nucleus1_x, nucleus1_y, charge=1)
@@ -202,14 +241,14 @@ psi2 = hydrogen_eigenstate_2d(3, -2, X, Y, nucleus2_x, nucleus2_y, scale=SCALE)
 # Apply phase vortex to enhance rotation
 theta1 = np.arctan2(Y - nucleus1_y, X - nucleus1_x)
 theta2 = np.arctan2(Y - nucleus2_y, X - nucleus2_x)
-psi1 *= np.exp(1j * 2 * theta1)  # Add additional angular momentum
-psi2 *= np.exp(-1j * 2 * theta2)
+# psi1 *= np.exp(1j * 2 * theta1)  # Add additional angular momentum
+# psi2 *= np.exp(-1j * 2 * theta2)
 
 # Also apply some linear momentum for interesting dynamics
 momentum1 = np.exp(1j * (2 * KX * X + 1 * KY * Y))
 momentum2 = np.exp(-1j * (1.5 * KX * X - 1.2 * KY * Y))
-psi1 *= momentum1
-psi2 *= momentum2
+# psi1 *= momentum1
+# psi2 *= momentum2
 
 # Initial dynamic positions and velocities for protons
 nucleus1_pos = np.array([nucleus1_x, nucleus1_y], dtype=np.float64)
@@ -272,7 +311,7 @@ def tween_wavefunctions(psi_start, psi_end, alpha):
     return (1 - alpha) * psi_start + alpha * psi_end
 
 # Timing parameters for tweening
-stay_duration = 60  # Number of time steps to stay in a state
+stay_duration = 600000000  # Number of time steps to stay in a state
 tween_duration = 15  # Number of time steps for a tween
 tween_step = 0
 stay_step = 0
@@ -283,7 +322,7 @@ next_state_index = 1
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
 cur = psi1.copy()
 print("Simulating hydrogen atom with dynamic nuclei and two electrons...")
-print(f"Time steps: {TIME_STEPS}, dt: {DT}")
+print(f"Time steps: {TIME_STEPS}, dt: {TIME_DELTA}")
 
 for step in range(TIME_STEPS):
     if step % 50 == 0:
@@ -330,21 +369,19 @@ for step in range(TIME_STEPS):
     force1 = compute_force_from_density(density1, nucleus1_pos)
     force2 = compute_force_from_density(density2, nucleus2_pos)
 
-    # Proton-proton Coulomb repulsion
-    diff = nucleus2_pos - nucleus1_pos
-    r = np.linalg.norm(diff)
-    r = max(r, 1.0)
-    force_between = diff / r**3
+    # Enhanced proton-proton nuclear forces (Coulomb + strong nuclear force)
+    nuclear_force_1_to_2 = compute_nuclear_force(nucleus1_pos, nucleus2_pos)
+    nuclear_force_2_to_1 = -nuclear_force_1_to_2  # Newton's third law
 
-    # Total forces on each proton
-    force_on_1 = force1 - force_between
-    force_on_2 = force2 + force_between
+    # Total forces on each proton (electron attraction + nuclear forces)
+    force_on_1 = force1 + nuclear_force_2_to_1
+    force_on_2 = force2 + nuclear_force_1_to_2
 
     # Update velocities and positions
-    nucleus1_vel += DT * force_on_1 / proton_mass
-    nucleus2_vel += DT * force_on_2 / proton_mass
-    nucleus1_pos += DT * nucleus1_vel
-    nucleus2_pos += DT * nucleus2_vel
+    nucleus1_vel += TIME_DELTA * force_on_1 / proton_mass
+    nucleus2_vel += TIME_DELTA * force_on_2 / proton_mass
+    nucleus1_pos += TIME_DELTA * nucleus1_vel
+    nucleus2_pos += TIME_DELTA * nucleus2_vel
 
     # Recreate potentials based on updated positions
     nuclear_potential1 = create_nucleus_potential(
@@ -365,7 +402,7 @@ for step in range(TIME_STEPS):
     
     # Apply a small low-pass filter at each step to smooth the wavefunctions
     # This helps reduce numerical artifacts and stabilize the simulation
-    slight_cutoff_frequency = 0.8  # Higher than initial cutoff, just for light smoothing
+    slight_cutoff_frequency = 0.9  # Higher than initial cutoff, just for light smoothing
     psi1 = apply_low_pass_filter(psi1, slight_cutoff_frequency)
     psi2 = apply_low_pass_filter(psi2, slight_cutoff_frequency)
 
@@ -373,7 +410,7 @@ for step in range(TIME_STEPS):
     # cur = center_wave(cur)
     # cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
     # cur = apply_edge_blur(cur)
-    # cur = apply_absorption_edge_low_pass(cur, cutoff_frequency=0.1)
+    cur = apply_absorption_edge_low_pass(cur, cutoff_frequency=0.1)
 
     # Record frames for visualization
     region = psi1 + psi2  # Display combined electron wavefunctions

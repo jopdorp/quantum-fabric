@@ -6,10 +6,10 @@ from plot_utils import create_and_show_plot
 from video_utils import create_video, open_video
 
 # Grid and simulation parameters
-SIZE = 256
+SIZE = 300
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = SIZE * 3  # Longer simulation for orbital dynamics
+TIME_STEPS = SIZE  # Longer simulation for orbital dynamics
 MAX_GATES_PER_CELL = 4
 DT = 2  # Smaller time step for stability with potential
 
@@ -188,7 +188,7 @@ def transition_quantum_numbers(step, total_steps, initial_quantum_numbers, final
     l = l1 + (l2 - l1) * (step / total_steps)
     m = m1 + (m2 - m1) * (step / total_steps)
 
-    return int(round(n)), int(round(l)), int(round(m))
+    return n, round(l), round(m)
 
 # Initial and final quantum numbers for the transition
 initial_quantum_numbers = (1, 0, 0)  # 1s orbital

@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from math import pi, factorial # Import factorial directly
+from math import pi, factorial  # Import factorial directly
 from matplotlib.widgets import Button
 from plot_utils import create_and_show_plot
 from video_utils import create_video, open_video
@@ -12,17 +12,15 @@ SIZE = 256
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
 TIME_STEPS = SIZE * 6
-DT = 0.5  # Reduced DT for richer time evolution
-SIGMA_AMPLIFIER = 0.4
-POTENTIAL_STRENGTH = 1.0  # Increased potential strength and corrected typo from POTENTIAL_STRENTGH
+DT = 10  # Reduced DT for richer time evolution
+SIGMA_AMPLIFIER = 0.8
+POTENTIAL_STRENGTH = 1.0  # Increased potential strength and corrected typo
 MAX_GATES_PER_CELL = 4
 
 # Add global variables for configuration
-SCALE = 9000.0 # Previously 400.0
-# INITIAL_MOMENTUM_X = 3000.3 # Replaced by KX
-# INITIAL_MOMENTUM_Y = 1000    # Replaced by KY
-KX = 2 * np.pi / SIZE * 1  # Wavevector component for x-direction (reduced from 5 to 1)
-KY = 2 * np.pi / SIZE * 1  # Wavevector component for y-direction (reduced from 2 to 1)
+SCALE = 3000.0  # Previously 400.0
+KX = 2 * np.pi / SIZE * 1  # Wavevector component for x-direction
+KY = 2 * np.pi / SIZE * 1  # Wavevector component for y-direction
 
 # --- Initial world state
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
@@ -53,9 +51,8 @@ def hydrogen_eigenstate_2d(n, m, x, y, center_x, center_y, scale=400.0):
 
 def create_orbital_electron(x, y, center_x, center_y, orbital_radius, quantum_numbers, scale=None):
     if scale is None:
-        scale = SCALE # Use current global SCALE if no specific scale is provided
+        scale = SCALE  # Use current global SCALE if no specific scale is provided
     n, l, m = quantum_numbers
-    # Scale the spatial coordinates
     x_scaled = x / scale
     y_scaled = y / scale
     center_x_scaled = center_x / scale
@@ -77,10 +74,7 @@ def create_nucleus_potential(x, y, nucleus_x, nucleus_y, charge=1):
     r = np.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2)
     r = np.maximum(r, 1.0)
     # Coulomb potential: V = -k*Z/r (attractive for electrons)
-    # Adjust potential strength for stability
-    # This value can be tuned to control the strength of the potential
-    potential_strength = POTENTIAL_STRENGTH
-    return -potential_strength * charge / r
+    return -POTENTIAL_STRENGTH * charge / r
 
 def add_noise(psi, noise_level=0.001):
     noise = (np.random.rand(*psi.shape) - 0.5) * noise_level
@@ -137,9 +131,6 @@ def center_wave(psi):
     shift_x = int(np.round((SIZE // 2) - smooth_cx))
     return np.roll(np.roll(psi, shift_y, axis=0), shift_x, axis=1)
 
-# Adjust reverse Gaussian blur to increase the blur effect
-# Ensure 50% of the image is entirely blurred out
-
 def reverse_gaussian_blur(psi, center_x, center_y):
     """Apply an optimized reverse Gaussian blur with stronger blur for 50% of the image."""
     r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
@@ -156,7 +147,6 @@ def reverse_gaussian_blur(psi, center_x, center_y):
 
     return optimized_psi
 
-# Function to apply a low-pass filter
 def apply_low_pass_filter(psi, cutoff_frequency):
     """Apply a low-pass filter to the wavefunction to remove high-frequency components."""
     psi_hat = np.fft.fft2(psi)
@@ -173,29 +163,23 @@ def apply_low_pass_filter(psi, cutoff_frequency):
     psi_filtered = np.fft.ifft2(psi_hat_filtered)
     return psi_filtered
 
-# Function to apply a low-pass filter to the absorption edge
 def apply_absorption_edge_low_pass(psi, cutoff_frequency, blur_factor=SIZE // 2):
     """Apply a low-pass filter specifically to the absorption edge."""
-    # Compute the edge mask
     r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
     edge_mask = np.exp(-r**2 / (2 * blur_factor**2))
 
-    # Apply the low-pass filter
     psi_hat = np.fft.fft2(psi * edge_mask)
     kx = np.fft.fftfreq(psi.shape[1]) * 2 * np.pi
     ky = np.fft.fftfreq(psi.shape[0]) * 2 * np.pi
     KX, KY = np.meshgrid(kx, ky)
     k_squared = KX**2 + KY**2
 
-    # Create a low-pass filter mask
     low_pass_mask = k_squared <= (cutoff_frequency**2)
     psi_hat_filtered = psi_hat * low_pass_mask
 
-    # Transform back to spatial domain
     psi_filtered = np.fft.ifft2(psi_hat_filtered)
     return psi_filtered.real
 
-# Function to apply a large blur to the edges of the world
 def apply_edge_blur(psi, blur_factor=SIZE // 2):
     """Apply a large Gaussian blur to the edges of the world."""
     r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
@@ -203,37 +187,58 @@ def apply_edge_blur(psi, blur_factor=SIZE // 2):
     return psi * edge_blur
 
 # Initial conditions
-# Define two hydrogen nuclei
+# Define two hydrogen nuclei (fixed starting positions)
 nucleus1_x, nucleus1_y = center_x - SIZE // 6, center_y
 nucleus2_x, nucleus2_y = center_x + SIZE // 6, center_y
 
-# Two nuclear potentials
+# Two nuclear potentials (will be overwritten dynamically each step)
 nuclear_potential1 = create_nucleus_potential(X, Y, nucleus1_x, nucleus1_y, charge=1)
 nuclear_potential2 = create_nucleus_potential(X, Y, nucleus2_x, nucleus2_y, charge=1)
 
-# Two electrons with opposite initial momentum
+# Two electrons with excited states having angular momentum (swirling orbitals)
 psi1 = hydrogen_eigenstate_2d(1, 0, X, Y, nucleus1_x, nucleus1_y, scale=SCALE)
-psi2 = hydrogen_eigenstate_2d(1, 0, X, Y, nucleus2_x, nucleus2_y, scale=SCALE)
+psi2 = hydrogen_eigenstate_2d(3, -2, X, Y, nucleus2_x, nucleus2_y, scale=SCALE)
 
-# Apply asymmetric momentum to reduce perfect phase cancellation
-momentum1 = np.exp(1j * (KX * X + KY * Y))
-momentum2 = np.exp(-1j * (0.8 * KX * X - 0.6 * KY * Y))
+# Apply phase vortex to enhance rotation
+theta1 = np.arctan2(Y - nucleus1_y, X - nucleus1_x)
+theta2 = np.arctan2(Y - nucleus2_y, X - nucleus2_x)
+psi1 *= np.exp(1j * 2 * theta1)  # Add additional angular momentum
+psi2 *= np.exp(-1j * 2 * theta2)
+
+# Also apply some linear momentum for interesting dynamics
+momentum1 = np.exp(1j * (2 * KX * X + 1 * KY * Y))
+momentum2 = np.exp(-1j * (1.5 * KX * X - 1.2 * KY * Y))
 psi1 *= momentum1
 psi2 *= momentum2
 
+# Initial dynamic positions and velocities for protons
+nucleus1_pos = np.array([nucleus1_x, nucleus1_y], dtype=np.float64)
+nucleus2_pos = np.array([nucleus2_x, nucleus2_y], dtype=np.float64)
+nucleus1_vel = np.zeros(2)
+nucleus2_vel = np.zeros(2)
+proton_mass = 1836.0  # Proton is ~1836 times heavier than electron
+
+def compute_force_from_density(charge_density, nucleus_pos):
+    """Compute forces on nucleus from electron density."""
+    dx = X - nucleus_pos[0]
+    dy = Y - nucleus_pos[1]
+    r = np.sqrt(dx**2 + dy**2)
+    r = np.maximum(r, 1.0)
+    force_x = np.sum((dx / r**3) * charge_density)
+    force_y = np.sum((dy / r**3) * charge_density)
+    return np.array([force_x, force_y])
+
+# Normalize and pre-process initial wavefunctions
 psi1 = normalize_wavefunction(psi1)
 psi2 = normalize_wavefunction(psi2)
-
-# Apply the updated reverse Gaussian blur to the initial wavefunction
 psi1 = reverse_gaussian_blur(psi1, center_x, center_y)
 psi2 = reverse_gaussian_blur(psi2, center_x, center_y)
 
-# Apply a low-pass filter to the initial wavefunction
-cutoff_frequency = 0.1  # Adjust cutoff frequency as needed
+cutoff_frequency = 0.1  # Adjust as needed
 psi1 = apply_low_pass_filter(psi1, cutoff_frequency)
 psi2 = apply_low_pass_filter(psi2, cutoff_frequency)
 
-# Quantum gate infrastructure (optional but present)
+# Quantum gate infrastructure (optional)
 def hadamard(amp): return amp * (1 + 1j) / np.sqrt(2)
 def pauli_x(amp): return -amp
 def t_gate(amp): return amp * np.exp(1j * pi / 4)
@@ -250,7 +255,7 @@ def add_gate_patch(gate_patch_map, center_y, center_x, gate_fn):
                             gate_patch_map[y, x, i] = gate_fn
                             break
 
-# Centering state
+# Centering state (not currently used)
 smooth_cy = SIZE // 2
 smooth_cx = SIZE // 2
 smoothing_factor = 2000
@@ -263,93 +268,112 @@ stable_states = [
     (4, 3)    # Excited state 3
 ]
 
-# Function to interpolate between two wavefunctions
 def tween_wavefunctions(psi_start, psi_end, alpha):
     return (1 - alpha) * psi_start + alpha * psi_end
 
-# Timing parameters
-stay_duration = 60  # Number of time steps to stay in a state (2 seconds at 30 FPS)
-tween_duration = 15  # Number of time steps for a 0.5-second tween (at 30 FPS)
+# Timing parameters for tweening
+stay_duration = 60  # Number of time steps to stay in a state
+tween_duration = 15  # Number of time steps for a tween
 tween_step = 0
 stay_step = 0
-
-# Initialize variables for tweening
 current_state_index = 0
 next_state_index = 1
 
 # Simulation loop
 frames_real, frames_imag, frames_phase, frames_prob = [], [], [], []
 cur = psi1.copy()
-print("Simulating hydrogen atom with single electron...")
+print("Simulating hydrogen atom with dynamic nuclei and two electrons...")
 print(f"Time steps: {TIME_STEPS}, dt: {DT}")
 
 for step in range(TIME_STEPS):
     if step % 50 == 0:
         print(f"Step {step}/{TIME_STEPS}")
 
+    # Hydrogen orbital tweening (optional visualization step)
     if stay_step < stay_duration:
-        # Stay in the current state
-        if stay_step == 0:  # Only create the wavefunction once per state
+        if stay_step == 0:
             current_state = stable_states[current_state_index]
-            cur = hydrogen_eigenstate_2d(current_state[0], current_state[1], X, Y, center_x, center_y, scale=SCALE)
+            cur = hydrogen_eigenstate_2d(
+                current_state[0], current_state[1], X, Y,
+                int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
+            )
             cur = normalize_wavefunction(cur)
         stay_step += 1
     elif tween_step < tween_duration:
-        # Tweening logic
         current_state = stable_states[current_state_index]
         next_state = stable_states[next_state_index]
-
-        # Generate wavefunctions for the current and next states
-        psi_current = hydrogen_eigenstate_2d(current_state[0], current_state[1], X, Y, center_x, center_y, scale=SCALE)
-        psi_next = hydrogen_eigenstate_2d(next_state[0], next_state[1], X, Y, center_x, center_y, scale=SCALE)
-
-        # Interpolate between the two states
+        psi_current = hydrogen_eigenstate_2d(
+            current_state[0], current_state[1], X, Y,
+            int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
+        )
+        psi_next = hydrogen_eigenstate_2d(
+            next_state[0], next_state[1], X, Y,
+            int(nucleus1_pos[0]), int(nucleus1_pos[1]), scale=SCALE
+        )
         alpha = tween_step / tween_duration
         cur = tween_wavefunctions(psi_current, psi_next, alpha)
-
-        # Add momentum during tweening to create imaginary components
-        # Using KX and KY for tweening momentum, scaled by alpha
-        momentum_x = KX * 0.1 * alpha  # Using global KX
-        momentum_y = KY * 0.1 * alpha  # Using global KY
-        # X and Y are the global meshgrid variables
+        momentum_x = KX * 0.1 * alpha
+        momentum_y = KY * 0.1 * alpha
         momentum_phase = np.exp(1j * (momentum_x * X + momentum_y * Y))
         cur *= momentum_phase
-
-        # Normalize the wavefunction
         cur = normalize_wavefunction(cur)
-
         tween_step += 1
     else:
-        # Move to the next stable state
         current_state_index = next_state_index
         next_state_index = (next_state_index + 1) % len(stable_states)
         stay_step = 0
         tween_step = 0
 
-    # Add mean-field repulsion dynamically
-    # Combined nuclear potential for both electrons - each electron is attracted to both nuclei
+    # --- Dynamic Proton Updates ---
+    density1 = np.abs(psi1)**2
+    density2 = np.abs(psi2)**2
+    force1 = compute_force_from_density(density1, nucleus1_pos)
+    force2 = compute_force_from_density(density2, nucleus2_pos)
+
+    # Proton-proton Coulomb repulsion
+    diff = nucleus2_pos - nucleus1_pos
+    r = np.linalg.norm(diff)
+    r = max(r, 1.0)
+    force_between = diff / r**3
+
+    # Total forces on each proton
+    force_on_1 = force1 - force_between
+    force_on_2 = force2 + force_between
+
+    # Update velocities and positions
+    nucleus1_vel += DT * force_on_1 / proton_mass
+    nucleus2_vel += DT * force_on_2 / proton_mass
+    nucleus1_pos += DT * nucleus1_vel
+    nucleus2_pos += DT * nucleus2_vel
+
+    # Recreate potentials based on updated positions
+    nuclear_potential1 = create_nucleus_potential(
+        X, Y, nucleus1_pos[0], nucleus1_pos[1], charge=1
+    )
+    nuclear_potential2 = create_nucleus_potential(
+        X, Y, nucleus2_pos[0], nucleus2_pos[1], charge=1
+    )
     combined_nuclear_potential = nuclear_potential1 + nuclear_potential2
-    
-    # Each electron experiences both nuclei attraction and the other electron's repulsion
+
+    # Each electron experiences both nuclei attraction and the other electron’s repulsion
     V1 = combined_nuclear_potential + add_mean_field_coulomb_repulsion(psi2)
     V2 = combined_nuclear_potential + add_mean_field_coulomb_repulsion(psi1)
 
+    # Propagate electrons
     psi1 = propagate_wave_with_potential(psi1, V1)
     psi2 = propagate_wave_with_potential(psi2, V2)
-    
-    # The following lines involving 'cur' will be updated or removed by subsequent edits
+
+    # Optional spatial gates or blurs (commented out)
     # cur = center_wave(cur)
     # cur = apply_spatial_gates_from_patch(cur, gate_patch_map)
     # cur = apply_edge_blur(cur)
     # cur = apply_absorption_edge_low_pass(cur, cutoff_frequency=0.1)
 
     # Record frames for visualization
-    # region = cur  # Visualize the entire grid # This line will be replaced
-    region = psi1 + psi2 # Display both electrons' combined wavefunction
+    region = psi1 + psi2  # Display combined electron wavefunctions
     frames_real.append(np.real(region))
     frames_imag.append(np.imag(region))
 
-    # Record phase with smooth blurring to prevent sharp transitions
     blurred_region = gaussian_filter(region, sigma=1)
     frames_phase.append(np.angle(blurred_region))
 

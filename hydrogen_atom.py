@@ -16,7 +16,7 @@ from physics import (
 nucleus1_x, nucleus1_y = center_x, center_y
 
 # Initialize electrons
-orb_px = 80
+orb_px = 40
 psi1 = create_orbital_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, (1,0,0))
 psi1 = limit_frame(psi1)
 

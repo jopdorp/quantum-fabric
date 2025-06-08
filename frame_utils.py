@@ -37,7 +37,7 @@ def apply_absorbing_edge(psi, strength=1):
     return psi * mask
 
 
-smoothing_factor = 2000
+smoothing_factor = 20000
 smooth_cy, smooth_cx = SIZE // 2, SIZE // 2
 
 def center_wave(psi):

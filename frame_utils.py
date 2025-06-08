@@ -16,45 +16,48 @@ def apply_low_pass_filter(psi, cutoff):
     mask = (KX**2 + KY**2) <= cutoff**2
     return np.fft.ifft2(psi_hat * mask)
 
-
-# TODO: Phase damping is not working
-def apply_absorbing_edge(psi, strength=1):
+def apply_absorbing_edge(psi, strength=5):
+    # Circular absorbing mask - starts gentle, becomes total at frame edges
     r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
-    # Not sure why we need 0.35, but it seems to work well
-    # This is the radius at which the wavefunction starts to be absorbed
-    absorb_r = min(SIZE * 0.35, center_x - 30)
-    mask = np.ones_like(r)
-    outside = r > absorb_r
-    mask[outside] = np.exp(-strength * (r[outside] - absorb_r))
-    mask 
+    
+    # Start absorption at 80% of max possible radius, total absorption at frame edge
+    max_radius = min(center_x, center_y, SIZE - center_x, SIZE - center_y)
+    absorption_start = max_radius * 0.8
+    absorption_end = max_radius * 0.98  # Ensure total absorption before frame edge
+    
+    mask = np.ones(psi.shape, dtype=np.float32)
+    
+    # Only apply absorption in outer region
+    outer_region = r > absorption_start
+    if np.any(outer_region):
+        # Smooth exponential absorption that ramps up toward edges
+        absorption_depth = (r[outer_region] - absorption_start) / (absorption_end - absorption_start)
+        absorption_depth = np.clip(absorption_depth, 0, 1)
+        # Exponential curve for strong absorption near edges
+        mask[outer_region] = np.exp(-strength * absorption_depth**3 * 10)
+    
     return psi * mask
 
-### Some unused utility functions below, kept for reference
-def add_noise(psi, noise_level=0.001):
-    noise = (np.random.rand(*psi.shape) - 0.5) * noise_level
-    return psi + noise.astype(np.complex128)
 
-def apply_edge_blur(psi, blur_factor=SIZE // 2):
-    """Apply a large Gaussian blur to the edges of the world."""
-    r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
-    edge_blur = np.exp(-r**2 / (2 * blur_factor**2))
-    return psi * edge_blur
+radius=SIZE * 0.35
+r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+transition_start = radius * 0.7
+transition_end = radius * 1.5
+transition_width = transition_end - transition_start
+normalized_distance = (r - transition_start) / transition_width
+transition_mask = np.clip(normalized_distance, 0, 1)
+transition_mask = transition_mask * transition_mask * (3 - 2 * transition_mask)
+blur_region = r > transition_start
 
-def reverse_gaussian_blur(psi, center_x, center_y):
-    """Apply an optimized reverse Gaussian blur with stronger blur for 50% of the image."""
-    r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
-    max_sigma = SIZE // 2  # Maximum blur for 50% of the image
-    min_sigma = 1          # Minimum blur at the center
-    sigma_map = min_sigma + (max_sigma - min_sigma) * (r / np.max(r))
-
-    # Precompute a spatially varying kernel
-    blurred_psi = gaussian_filter(psi, sigma=max_sigma)
-
-    # Blend the original and blurred wavefunction based on sigma_map
-    blend_factor = (sigma_map - min_sigma) / (max_sigma - min_sigma)
-    optimized_psi = psi * (1 - blend_factor) + blurred_psi * blend_factor
-
-    return optimized_psi
+def blur_edges(psi, blur_strength=100.0):
+    """Ultra-fast blur using precomputed masks and separable filtering."""
+    # Use separable filtering for speed
+    from scipy.ndimage import gaussian_filter1d
+    sigma = blur_strength / 3  # Compensate for separable filtering
+    blurred_psi = gaussian_filter1d(gaussian_filter1d(psi, sigma, axis=0), sigma, axis=1)
+    
+    # Apply precomputed transition mask
+    return psi * (1 - transition_mask) + blurred_psi * transition_mask
 
 def center_wave(psi):
     global smooth_cy, smooth_cx, smoothing_factor

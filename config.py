@@ -5,13 +5,13 @@ import numpy as np
 SIZE = 512
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = 512
-TIME_DELTA = 200  # Reduced DT for richer time evolution
+TIME_STEPS = 500
+TIME_DELTA = 2  # Reduced DT for richer time evolution
 POTENTIAL_STRENGTH = 1.0  # Coulomb strength
 MAX_GATES_PER_CELL = 4  # Quantum gates per cell
 
 # Zoom configuration (visualization decoupled)
-ZOOM = 4000.0
+ZOOM = 40000.0
 BASE_SCALE = 400.0
 SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
 

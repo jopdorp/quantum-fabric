@@ -1,6 +1,4 @@
 import numpy as np
-from config import SCALE, SIGMA_AMPLIFIER
-from scipy.special import genlaguerre, factorial
 
 def create_orbital_electron(x, y, cx, cy, radius_px, quantum_numbers):
     n, l, m = quantum_numbers

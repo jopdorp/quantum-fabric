@@ -1,7 +1,5 @@
 import numpy as np
 from config import SIZE, X, Y, center_x, center_y
-from opencl_blur_optimizer import OpenCLBlurOptimizer
-_opencl_blur = OpenCLBlurOptimizer()
 
 def normalize_wavefunction(psi):
     """Normalize psi so that sum(|psi|^2)==1"""
@@ -16,7 +14,7 @@ def apply_low_pass_filter(psi, cutoff):
     mask = (KX**2 + KY**2) <= cutoff**2
     return np.fft.ifft2(psi_hat * mask)
 
-def apply_absorbing_edge(psi, strength=5):
+def apply_absorbing_edge(psi, strength=1):
     # Circular absorbing mask - starts gentle, becomes total at frame edges
     r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
     
@@ -39,7 +37,7 @@ def apply_absorbing_edge(psi, strength=5):
     return psi * mask
 
 
-smoothing_factor = 200000
+smoothing_factor = 2000
 smooth_cy, smooth_cx = SIZE // 2, SIZE // 2
 
 def center_wave(psi):

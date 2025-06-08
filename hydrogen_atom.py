@@ -19,6 +19,11 @@ nucleus1_x, nucleus1_y = center_x, center_y
 orb_px = 40
 psi1 = create_orbital_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, (1,0,0))
 psi1 = limit_frame(psi1)
+# add momentum to the wavefunction via phase
+MOMENTUM_X = 0.5  # momentum in x direction
+MOMENTUM_Y = 0.8  # momentum in y direction
+psi1 = psi1 * np.exp(1j * (X * MOMENTUM_X * np.pi / orb_px + Y * MOMENTUM_Y * np.pi / orb_px))
+
 
 # Simulation
 frames_r, frames_i, frames_ph, frames_p = [],[],[],[]

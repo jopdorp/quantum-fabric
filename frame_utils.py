@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.ndimage import gaussian_filter
 from config import SIZE, X, Y, center_x, center_y
-
+from opencl_blur_optimizer import OpenCLBlurOptimizer
+_opencl_blur = OpenCLBlurOptimizer()
 
 def normalize_wavefunction(psi):
     """Normalize psi so that sum(|psi|^2)==1"""
@@ -22,8 +22,8 @@ def apply_absorbing_edge(psi, strength=5):
     
     # Start absorption at 80% of max possible radius, total absorption at frame edge
     max_radius = min(center_x, center_y, SIZE - center_x, SIZE - center_y)
-    absorption_start = max_radius * 0.8
-    absorption_end = max_radius * 0.98  # Ensure total absorption before frame edge
+    absorption_start = max_radius * 0.7
+    absorption_end = max_radius * 0.96  # Ensure total absorption before frame edge
     
     mask = np.ones(psi.shape, dtype=np.float32)
     
@@ -34,33 +34,16 @@ def apply_absorbing_edge(psi, strength=5):
         absorption_depth = (r[outer_region] - absorption_start) / (absorption_end - absorption_start)
         absorption_depth = np.clip(absorption_depth, 0, 1)
         # Exponential curve for strong absorption near edges
-        mask[outer_region] = np.exp(-strength * absorption_depth**3 * 10)
+        mask[outer_region] = np.exp(-strength * absorption_depth**3)
     
     return psi * mask
 
 
-radius=SIZE * 0.35
-r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
-transition_start = radius * 0.7
-transition_end = radius * 1.5
-transition_width = transition_end - transition_start
-normalized_distance = (r - transition_start) / transition_width
-transition_mask = np.clip(normalized_distance, 0, 1)
-transition_mask = transition_mask * transition_mask * (3 - 2 * transition_mask)
-blur_region = r > transition_start
-
-def blur_edges(psi, blur_strength=100.0):
-    """Ultra-fast blur using precomputed masks and separable filtering."""
-    # Use separable filtering for speed
-    from scipy.ndimage import gaussian_filter1d
-    sigma = blur_strength / 3  # Compensate for separable filtering
-    blurred_psi = gaussian_filter1d(gaussian_filter1d(psi, sigma, axis=0), sigma, axis=1)
-    
-    # Apply precomputed transition mask
-    return psi * (1 - transition_mask) + blurred_psi * transition_mask
+smoothing_factor = 200000
+smooth_cy, smooth_cx = SIZE // 2, SIZE // 2
 
 def center_wave(psi):
-    global smooth_cy, smooth_cx, smoothing_factor
+    global smooth_cy, smooth_cx
     prob = np.abs(psi)**2
     total = np.sum(prob)
     if total == 0:
@@ -73,3 +56,11 @@ def center_wave(psi):
     shift_y = int(np.round((SIZE // 2) - smooth_cy))
     shift_x = int(np.round((SIZE // 2) - smooth_cx))
     return np.roll(np.roll(psi, shift_y, axis=0), shift_x, axis=1)
+
+def limit_frame(psi1):
+    psi1 = apply_absorbing_edge(psi1)
+    psi1 = apply_low_pass_filter(psi1, cutoff=1)
+
+    psi1 = center_wave(psi1)
+    psi1 = normalize_wavefunction(psi1)
+    return psi1

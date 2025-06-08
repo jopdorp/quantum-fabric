@@ -85,14 +85,14 @@ def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA):
 
 ### Some unused utility functions below, kept for reference
 
-def enhanced_electron_electron_repulsion(psi1, psi2):
+def enhanced_electron_electron_repulsion(psi1, psi2, electron_repulsion_strength=0.1):
     """Enhanced electron-electron repulsion with better physical modeling."""
     density1 = np.abs(psi1)**2
     density2 = np.abs(psi2)**2
     
     # Create repulsion potential based on both electron densities
     # Use different sigma values for short and long range interactions
-    short_range_repulsion = gaussian_filter(density2, sigma=2) * ELECTRON_REPULSION_STRENGTH * 2
-    long_range_repulsion = gaussian_filter(density2, sigma=8) * ELECTRON_REPULSION_STRENGTH * 0.5
+    short_range_repulsion = gaussian_filter(density2, sigma=2) * electron_repulsion_strength * 2
+    long_range_repulsion = gaussian_filter(density2, sigma=8) * electron_repulsion_strength * 0.5
     
     return short_range_repulsion + long_range_repulsion

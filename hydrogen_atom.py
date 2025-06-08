@@ -3,7 +3,7 @@ from video_utils import create_video, open_video
 from scipy.ndimage import gaussian_filter
 from config import TIME_STEPS, X, Y, center_x, center_y
 from particles import create_orbital_electron
-from frame_utils import normalize_wavefunction, apply_absorbing_edge, apply_low_pass_filter, blur_edges
+from frame_utils import limit_frame
 from physics import (
     create_nucleus_potential,
     compute_force_from_density,
@@ -16,13 +16,9 @@ from physics import (
 nucleus1_x, nucleus1_y = center_x, center_y
 
 # Initialize electrons
-orb_px = 30
+orb_px = 80
 psi1 = create_orbital_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, (1,0,0))
-psi1 = apply_low_pass_filter(psi1, cutoff=0.99)
-psi1 = blur_edges(psi1)
-psi1 = apply_absorbing_edge(psi1)
-psi1 = normalize_wavefunction(psi1)
-
+psi1 = limit_frame(psi1)
 
 # Simulation
 frames_r, frames_i, frames_ph, frames_p = [],[],[],[]
@@ -35,10 +31,7 @@ for step in range(TIME_STEPS):
     f1 = compute_force_from_density(d1, pos1)
     V1 = create_nucleus_potential(X,Y,*pos1)
     psi1 = propagate_wave_with_potential(psi1, V1)
-    psi1 = apply_low_pass_filter(psi1, cutoff=0.999)
-    psi1 = blur_edges(psi1)
-    psi1 = apply_absorbing_edge(psi1)
-    psi1 = normalize_wavefunction(psi1)
+    psi1 = limit_frame(psi1)
     region = psi1
     frames_r.append(np.real(region))
     frames_i.append(np.imag(region))

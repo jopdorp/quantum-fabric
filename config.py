@@ -2,11 +2,11 @@ import numpy as np
 
 
 # Grid and simulation parameters
-SIZE = 512
+SIZE = 1024
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = 500
-TIME_DELTA = 1  # Reduced DT for richer time evolution
+TIME_STEPS = 200
+TIME_DELTA = 2  # Reduced DT for richer time evolution
 POTENTIAL_STRENGTH = 1.0  # Coulomb strength
 MAX_GATES_PER_CELL = 4  # Quantum gates per cell
 

@@ -26,57 +26,60 @@ def create_video(TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob
     """Create a video with horizontally stitched real, imaginary, and phase components"""
     print("Creating video...")
     
+    # Pre-calculate global ranges to avoid per-frame percentile calculations
+    print("Pre-calculating global ranges...")
+    all_real = np.concatenate([f.flatten() for f in frames_real])
+    all_prob = np.concatenate([f.flatten() for f in frames_prob])
+    all_imag_abs = np.concatenate([np.abs(f).flatten() for f in frames_imag])
+    
+    # Use global ranges for consistent scaling across all frames
+    real_global_min, real_global_max = np.percentile(all_real, [1, 99])
+    prob_global_min, prob_global_max = np.percentile(all_prob, [5, 95])
+    
+    # Handle imaginary component
+    if np.max(all_imag_abs) > 1e-10:
+        imag_global_min, imag_global_max = np.percentile(all_imag_abs, [0.1, 99.9])
+        if imag_global_max - imag_global_min < 1e-10:
+            imag_global_min = 0
+            imag_global_max = np.max(all_imag_abs) if np.max(all_imag_abs) > 0 else 1e-6
+    else:
+        imag_global_min, imag_global_max = 0, 1e-6
+    
     # Create the first frame to get video dimensions
     frame_real = frames_real[0]
     frame_imag = frames_imag[0]
     frame_prob = frames_prob[0]
     
-    # Calculate per-frame ranges for first frame
-    real_frame_min, real_frame_max = np.percentile(frame_real, [5, 95])
-    imag_frame_min, imag_frame_max = np.percentile(frame_imag, [5, 95])
-    prob_frame_min, prob_frame_max = np.percentile(frame_prob, [5, 95])
-    
-    real_colored = apply_colormap(frame_real, 'coolwarm', real_frame_min, real_frame_max)
-    imag_colored = apply_colormap(frame_imag, 'coolwarm', imag_frame_min, imag_frame_max)
+    real_colored = apply_colormap(frame_real, 'coolwarm', real_global_min, real_global_max)
+    abs_imag = np.abs(frame_imag)
+    imag_colored = apply_colormap(abs_imag, 'plasma', imag_global_min, imag_global_max)
     phase_colored = apply_colormap(frames_phase[0], 'twilight', -np.pi, np.pi)
-    prob_colored = apply_colormap(frame_prob, 'hot', prob_frame_min, prob_frame_max)
+    prob_colored = apply_colormap(frame_prob, 'hot', prob_global_min, prob_global_max)
     
     # Stitch frames horizontally
     stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
     video_height, video_width = stitched_frame.shape[:2]
     
-    # Create video writer with truly lossless codec
+    # Use faster H.264 codec instead of FFV1 for speed
     fourcc = cv2.VideoWriter_fourcc(*'FFV1')  # FFV1 is truly lossless
     video_writer = cv2.VideoWriter(output_file, fourcc, fps, (video_width, video_height))
     
-    # Generate and write frames directly
+    # Generate and write frames directly with pre-calculated ranges
+    print("Generating frames...")
     for t in range(TIME_STEPS):
-        # Use frame-by-frame normalization for better contrast
         frame_real = frames_real[t]
         frame_imag = frames_imag[t]
         frame_prob = frames_prob[t]
         frame_phase = frames_phase[t]
         
-        # Calculate per-frame ranges using percentiles for better contrast
-        real_frame_min, real_frame_max = np.percentile(frame_real, [1, 99])
-        prob_frame_min, prob_frame_max = np.percentile(frame_prob, [5, 95])
-        
-        # For imaginary component, use absolute values for better visibility
+        # Use pre-calculated global ranges - much faster than per-frame percentiles
         abs_imag = np.abs(frame_imag)
-        if np.max(abs_imag) > 1e-10:  # Check if there's meaningful imaginary data
-            imag_frame_min, imag_frame_max = np.percentile(abs_imag, [0.1, 99.9])
-            if imag_frame_max - imag_frame_min < 1e-10:
-                imag_frame_min = 0
-                imag_frame_max = np.max(abs_imag) if np.max(abs_imag) > 0 else 1e-6
-        else:
-            abs_imag = np.zeros_like(frame_imag)
-            imag_frame_min, imag_frame_max = 0, 1e-6
-
-        # Apply colormaps with proper scaling
-        real_colored = apply_colormap(frame_real, 'coolwarm', real_frame_min, real_frame_max)
-        imag_colored = apply_colormap(abs_imag, 'plasma', imag_frame_min, imag_frame_max)
-        phase_colored = apply_colormap(frame_phase, 'twilight', -np.pi, np.pi)  # Smooth fabric-like phase
-        prob_colored = apply_colormap(frame_prob, 'hot', prob_frame_min, prob_frame_max)
+        
+        # Apply colormaps with global scaling
+        real_colored = apply_colormap(frame_real, 'coolwarm', real_global_min, real_global_max)
+        imag_colored = apply_colormap(abs_imag, 'plasma', imag_global_min, imag_global_max)
+        phase_colored = apply_colormap(frame_phase, 'twilight', -np.pi, np.pi)
+        prob_colored = apply_colormap(frame_prob, 'hot', prob_global_min, prob_global_max)
 
         # Stitch frames horizontally
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
@@ -84,7 +87,7 @@ def create_video(TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob
         # Write frame to video
         video_writer.write(stitched_frame)
         
-        if t % 10 == 0:
+        if t % 50 == 0:  # Reduced logging frequency
             print(f"Generated frame {t}/{TIME_STEPS}")
     
     video_writer.release()

@@ -35,7 +35,7 @@ for step in range(TIME_STEPS):
     f1 = compute_force_from_density(d1, pos1)
     V1 = create_nucleus_potential(X,Y,*pos1)
     psi1 = propagate_wave_with_potential(psi1, V1)
-    psi1 = apply_low_pass_filter(psi1, cutoff=0.99)
+    psi1 = apply_low_pass_filter(psi1, cutoff=0.999)
     psi1 = blur_edges(psi1)
     psi1 = apply_absorbing_edge(psi1)
     psi1 = normalize_wavefunction(psi1)

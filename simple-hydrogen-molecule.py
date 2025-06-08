@@ -1,41 +1,24 @@
+from __future__ import annotations
 import numpy as np
-import matplotlib.pyplot as plt
-from math import pi, factorial  # Import factorial directly
-from matplotlib.widgets import Button
-from plot_utils import create_and_show_plot
 from video_utils import create_video, open_video
-from scipy.special import genlaguerre
 from scipy.ndimage import gaussian_filter
+from config import (
+    TIME_STEPS, TIME_DELTA, SIZE, X, Y, center_x, center_y,
+    POTENTIAL_STRENGTH, NUCLEAR_REPULSION_STRENGTH, NUCLEAR_CORE_RADIUS,
+    COULOMB_STRENGTH, STRONG_FORCE_STRENGTH, STRONG_FORCE_RANGE
+)
+# Frame utilities
+from frame_utils import (
+    normalize_wavefunction, apply_absorbing_edge, apply_low_pass_filter
+)
+# Particle utilities
+from particles import create_orbital_electron
+# Physics utilities
+from physics import (
+    create_nucleus_potential, compute_force_from_density,
+    compute_nuclear_force, propagate_wave_with_potential
+)
 
-# Grid and simulation parameters
-SIZE = 350
-GRID_WIDTH = SIZE
-GRID_HEIGHT = SIZE
-TIME_STEPS = SIZE
-TIME_DELTA = 100  # Reduced DT for richer time evolution
-POTENTIAL_STRENGTH = 1.0  # Coulomb strength
-MAX_GATES_PER_CELL = 4  # Quantum gates per cell
-
-# Zoom configuration (visualization decoupled)
-ZOOM = 4000.0
-BASE_SCALE = 400.0
-SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
-
-# Momentum terms
-KX = 0.5 * np.pi / SIZE
-KY = 0.3 * np.pi / SIZE
-
-# Physical constants
-COULOMB_STRENGTH = 1.0
-NUCLEAR_CORE_RADIUS = 2.0
-NUCLEAR_REPULSION_STRENGTH = 0.5
-STRONG_FORCE_STRENGTH = 0.1
-STRONG_FORCE_RANGE = 3.0
-ELECTRON_REPULSION_STRENGTH = 0.08
-
-# --- Initial world state
-X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
-center_x, center_y = SIZE // 2, SIZE // 2
 
 # Hydrogen nuclei positions (pixels)
 nucleus_offset_px = 60  # Distance between nuclei in pixels

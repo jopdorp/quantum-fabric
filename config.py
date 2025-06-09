@@ -5,19 +5,15 @@ import numpy as np
 SIZE = 600
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = 2000
-TIME_DELTA = 2  # Reduced DT for richer time evolution
-POTENTIAL_STRENGTH = 1.0  # Coulomb strength
-MAX_GATES_PER_CELL = 4  # Quantum gates per cell
+TIME_STEPS = 30000
+TIME_DELTA = 8  # Reduced DT for richer time evolution
+POTENTIAL_STRENGTH = .1  # Coulomb strength * 10 to confine electrons
+MAX_GATES_PER_CELL = 10  # Quantum gates per cell
 
 # Zoom configuration (visualization decoupled)
-ZOOM = 40000.0
+ZOOM = 4000.0
 BASE_SCALE = 400.0
 SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
-
-# Momentum terms
-KX = 0.5 * np.pi / SIZE
-KY = 0.3 * np.pi / SIZE
 
 # Physical constants
 COULOMB_STRENGTH = 1.0

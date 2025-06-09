@@ -4,43 +4,71 @@ import subprocess
 from matplotlib import cm
 
 def normalize_to_uint8(data, vmin, vmax):
-    """Normalize data to 0-255 uint8 range"""
+    """Normalize data to 0-255 uint8 range - optimized version"""
     # Handle edge case where vmin == vmax
-    if np.abs(vmax - vmin) < 1e-10:
+    range_val = vmax - vmin
+    if np.abs(range_val) < 1e-10:
         return np.full_like(data, 128, dtype=np.uint8)  # Return mid-gray
     
-    normalized = (data - vmin) / (vmax - vmin)
-    normalized = np.clip(normalized, 0, 1)
-    return (normalized * 255).astype(np.uint8)
+    # Vectorized operations with direct uint8 conversion
+    # Avoid intermediate float64 arrays by using float32 and direct scaling
+    inv_range = np.float32(255.0 / range_val)
+    offset = np.float32(-vmin * inv_range)
+    
+    # Single operation: scale, offset, and clip in one step
+    # This avoids creating multiple intermediate arrays
+    result = data * inv_range + offset
+    
+    # Clip and convert to uint8 in one operation
+    return np.clip(result, 0, 255).astype(np.uint8)
 
 def apply_colormap(data, colormap_name, vmin, vmax):
-    """Apply matplotlib colormap to data and convert to BGR"""
+    """Apply matplotlib colormap to data and convert to BGR - optimized version"""
     normalized = normalize_to_uint8(data, vmin, vmax)
+    
+    # Get colormap and create lookup table once
     colormap = cm.get_cmap(colormap_name)
-    colored = colormap(normalized / 255.0)  # colormap expects 0-1 range
-    # Convert RGBA to BGR and scale to 0-255
-    bgr = (colored[:, :, [2, 1, 0]] * 255).astype(np.uint8)  # BGR order for OpenCV
+    
+    # Pre-compute colormap LUT for all 256 values to avoid repeated calls
+    lut_indices = np.arange(256, dtype=np.float32) / 255.0
+    lut_rgba = colormap(lut_indices)
+    
+    # Convert LUT to BGR uint8 format once
+    lut_bgr = (lut_rgba[:, [2, 1, 0]] * 255).astype(np.uint8)
+    
+    # Use advanced indexing for ultra-fast lookup
+    # This is much faster than calling colormap() on every pixel
+    bgr = lut_bgr[normalized]
+    
     return bgr
 
 def apply_probability_colormap(log_prob_data, vmin, vmax, power=2.5):
-    """Apply custom probability colormap that darkens low values while preserving high values"""
-    # Normalize to 0-1 range
+    """Apply custom probability colormap that darkens low values while preserving high values - optimized version"""
+    # Normalize to 0-255 range directly
     if np.abs(vmax - vmin) < 1e-10:
-        normalized = np.full_like(log_prob_data, 0.5, dtype=np.float32)
+        normalized_uint8 = np.full_like(log_prob_data, 128, dtype=np.uint8)
     else:
+        # Normalize to 0-1 range first
         normalized = (log_prob_data - vmin) / (vmax - vmin)
         normalized = np.clip(normalized, 0, 1)
+        
+        # Apply power transformation to darken low values
+        enhanced = np.power(normalized, power)
+        
+        # Convert to uint8 for LUT indexing
+        normalized_uint8 = (enhanced * 255).astype(np.uint8)
     
-    # Apply power transformation to darken low values
-    # Values close to 0 become much darker, values close to 1 stay similar
-    enhanced = np.power(normalized, power)
-    
-    # Apply the 'hot' colormap
+    # Pre-compute colormap LUT with power transformation already applied
     colormap = cm.get_cmap('hot')
-    colored = colormap(enhanced)
+    lut_indices = np.arange(256, dtype=np.float32) / 255.0
+    lut_rgba = colormap(lut_indices)
     
-    # Convert RGBA to BGR and scale to 0-255
-    bgr = (colored[:, :, [2, 1, 0]] * 255).astype(np.uint8)
+    # Convert LUT to BGR uint8 format once
+    lut_bgr = (lut_rgba[:, [2, 1, 0]] * 255).astype(np.uint8)
+    
+    # Use advanced indexing for ultra-fast lookup
+    bgr = lut_bgr[normalized_uint8]
+    
     return bgr
 
 class StreamingVideoWriter:
@@ -142,7 +170,7 @@ class StreamingVideoWriter:
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
         video_height, video_width = stitched_frame.shape[:2]
         
-        fourcc = cv2.VideoWriter_fourcc(*'FFV1')  # Lossless codec
+        fourcc = cv2.VideoWriter_fourcc(*'HFYU')  # Lossless codec
         self.video_writer = cv2.VideoWriter(self.output_file, fourcc, self.fps, (video_width, video_height))
         
         print(f"Video writer initialized: {video_width}x{video_height}, {self.fps} fps")

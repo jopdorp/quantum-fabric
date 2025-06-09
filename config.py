@@ -5,7 +5,7 @@ import numpy as np
 SIZE = 600
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
-TIME_STEPS = 30000
+TIME_STEPS = 20000
 TIME_DELTA = 8  # Reduced DT for richer time evolution
 POTENTIAL_STRENGTH = .1  # Coulomb strength * 10 to confine electrons
 MAX_GATES_PER_CELL = 10  # Quantum gates per cell

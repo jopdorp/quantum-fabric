@@ -70,17 +70,36 @@ def compute_nuclear_force(nucleus1_pos, nucleus2_pos):
     
     return coulomb_force + nuclear_attraction
 
+# Global cache for kinetic phase arrays to avoid recomputation
+_kinetic_phase_cache = {}
+
 def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA):
-    potential_phase = np.exp(-1j * dt * potential / 2)
-    psi = psi * potential_phase
+    """Optimized wave propagation using split-step Fourier method with caching"""
+    # Cache key based on shape and dt
+    shape = psi.shape
+    cache_key = (shape[0], shape[1], dt)
+    
+    # Check if kinetic phase is already computed for this shape and dt
+    if cache_key not in _kinetic_phase_cache:
+        # Pre-compute and cache kinetic phase array
+        kx = np.fft.fftfreq(shape[1], d=1.0) * (2 * np.pi)
+        ky = np.fft.fftfreq(shape[0], d=1.0) * (2 * np.pi)
+        KX, KY = np.meshgrid(kx, ky, indexing='xy')
+        kinetic_phase = np.exp(-1j * dt * (KX**2 + KY**2) * 0.5)
+        _kinetic_phase_cache[cache_key] = kinetic_phase
+    else:
+        kinetic_phase = _kinetic_phase_cache[cache_key]
+    
+    # Pre-compute potential phase (half time step)
+    potential_phase = np.exp(-1j * dt * potential * 0.5)
+    
+    # Split-step propagation: V/2 -> T -> V/2
+    psi *= potential_phase
     psi_hat = np.fft.fft2(psi)
-    kx = np.fft.fftfreq(psi.shape[1]) * 2 * np.pi
-    ky = np.fft.fftfreq(psi.shape[0]) * 2 * np.pi
-    KX, KY = np.meshgrid(kx, ky)
-    kinetic_phase = np.exp(-1j * dt * (KX**2 + KY**2) / 2)
     psi_hat *= kinetic_phase
     psi = np.fft.ifft2(psi_hat)
-    psi = psi * potential_phase
+    psi *= potential_phase
+    
     return psi
 
 ### Some unused utility functions below, kept for reference

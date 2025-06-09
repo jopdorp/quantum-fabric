@@ -1,17 +1,33 @@
 import numpy as np
 from config import SIZE, X, Y, center_x, center_y
 
+# Global cache for frequency grids to avoid recomputation
+_freq_grid_cache = {}
+
 def normalize_wavefunction(psi):
     """Normalize psi so that sum(|psi|^2)==1"""
     norm = np.sqrt(np.sum(np.abs(psi)**2))
     return psi / norm if norm > 0 else psi
 
 def apply_low_pass_filter(psi, cutoff):
+    """Optimized low-pass filter with cached frequency grids"""
+    shape = psi.shape
+    cache_key = (shape[0], shape[1])
+    
+    # Check if frequency grid is already computed for this shape
+    if cache_key not in _freq_grid_cache:
+        # Pre-compute and cache frequency grid
+        kx = np.fft.fftfreq(shape[1]) * (2 * np.pi)
+        ky = np.fft.fftfreq(shape[0]) * (2 * np.pi)
+        KX, KY = np.meshgrid(kx, ky, indexing='xy')
+        k_squared = KX**2 + KY**2
+        _freq_grid_cache[cache_key] = k_squared
+    else:
+        k_squared = _freq_grid_cache[cache_key]
+    
+    # Apply filter
     psi_hat = np.fft.fft2(psi)
-    kx = np.fft.fftfreq(psi.shape[1])*2*np.pi
-    ky = np.fft.fftfreq(psi.shape[0])*2*np.pi
-    KX, KY = np.meshgrid(kx, ky)
-    mask = (KX**2 + KY**2) <= cutoff**2
+    mask = k_squared <= cutoff**2
     return np.fft.ifft2(psi_hat * mask)
 
 def apply_absorbing_edge(psi, strength=1):

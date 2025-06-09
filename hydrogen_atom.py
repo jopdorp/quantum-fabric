@@ -44,7 +44,7 @@ video_file = "hydrogen_atom_sim.mkv"
 # This allows streaming of the remaining 400 frames while keeping a small batch in memory
 video_writer = StreamingVideoWriter(
     output_file=video_file, 
-    fps=12, 
+    fps=24, 
     sample_frames=50,  # Sample fewer frames to start writing sooner
     keep_first_batch=True,
     first_batch_size=100  # Keep only first 100 frames in memory

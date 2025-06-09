@@ -73,7 +73,7 @@ def center_wave(psi):
 
 def limit_frame(psi1):
     psi1 = apply_absorbing_edge(psi1)
-    psi1 = apply_low_pass_filter(psi1, cutoff=1.1)
+    psi1 = apply_low_pass_filter(psi1, cutoff=1.2)
 
     # psi1 = center_wave(psi1)
     psi1 = normalize_wavefunction(psi1)

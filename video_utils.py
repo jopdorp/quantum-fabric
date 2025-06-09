@@ -170,7 +170,7 @@ class StreamingVideoWriter:
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
         video_height, video_width = stitched_frame.shape[:2]
         
-        fourcc = cv2.VideoWriter_fourcc(*'HFYU')  # Lossless codec
+        fourcc = cv2.VideoWriter_fourcc(*'IYUV')  # Lossless codec
         self.video_writer = cv2.VideoWriter(self.output_file, fourcc, self.fps, (video_width, video_height))
         
         print(f"Video writer initialized: {video_width}x{video_height}, {self.fps} fps")
@@ -218,7 +218,7 @@ class StreamingVideoWriter:
         
         # Apply log scale to probability
         log_prob = np.log10(np.maximum(frame_prob, 1e-10))
-        prob_colored = apply_probability_colormap(log_prob, self.log_prob_min, self.log_prob_max)
+        prob_colored = apply_probability_colormap(log_prob, self.log_prob_min, self.log_prob_max, power=10)
         
         # Stitch frames horizontally
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
@@ -279,98 +279,6 @@ class StreamingVideoWriter:
             'total_memory_mb': total_memory_mb,
             'sample_memory_mb': sample_frames_memory / (1024 * 1024)
         }
-
-def create_video(TIME_STEPS, frames_real, frames_imag, frames_phase, frames_prob, fps=8, output_file="quantumsim.mkv"):
-    """Create a video with horizontally stitched real, imaginary, and phase components
-    
-    WARNING: This function loads all frames into memory at once. For large simulations,
-    use StreamingVideoWriter instead to avoid running out of RAM.
-    """
-    print("Creating video...")
-    print(f"WARNING: Loading {TIME_STEPS} frames into memory. This may use significant RAM.")
-    print("Consider using StreamingVideoWriter for large simulations to reduce memory usage.")
-    
-    # Pre-calculate global ranges to avoid per-frame percentile calculations
-    print("Pre-calculating global ranges...")
-    all_real = np.concatenate([f.flatten() for f in frames_real])
-    all_prob = np.concatenate([f.flatten() for f in frames_prob])
-    all_imag_abs = np.concatenate([np.abs(f).flatten() for f in frames_imag])
-    
-    # Use global ranges for consistent scaling across all frames
-    real_global_min, real_global_max = np.percentile(all_real, [1, 99])
-    
-    # Use log scale for probability to handle high dynamic range
-    all_prob_nonzero = all_prob[all_prob > 0]
-    if len(all_prob_nonzero) > 0:
-        log_prob_min = np.log10(np.percentile(all_prob_nonzero, 1))
-        log_prob_max = np.log10(np.percentile(all_prob_nonzero, 99.9))
-    else:
-        log_prob_min, log_prob_max = -6, 0
-    
-    # Handle imaginary component
-    if np.max(all_imag_abs) > 1e-10:
-        imag_global_min, imag_global_max = np.percentile(all_imag_abs, [0.1, 99.9])
-        if imag_global_max - imag_global_min < 1e-10:
-            imag_global_min = 0
-            imag_global_max = np.max(all_imag_abs) if np.max(all_imag_abs) > 0 else 1e-6
-    else:
-        imag_global_min, imag_global_max = 0, 1e-6
-    
-    # Create the first frame to get video dimensions
-    frame_real = frames_real[0]
-    frame_imag = frames_imag[0]
-    frame_prob = frames_prob[0]
-    
-    real_colored = apply_colormap(frame_real, 'coolwarm', real_global_min, real_global_max)
-    abs_imag = np.abs(frame_imag)
-    imag_colored = apply_colormap(abs_imag, 'plasma', imag_global_min, imag_global_max)
-    phase_colored = apply_colormap(frames_phase[0], 'twilight', -np.pi, np.pi)
-    
-    # Apply log scale to probability
-    log_prob = np.log10(np.maximum(frame_prob, 1e-10))  # Avoid log(0)
-    prob_colored = apply_probability_colormap(log_prob, log_prob_min, log_prob_max)
-    
-    # Stitch frames horizontally
-    stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
-    video_height, video_width = stitched_frame.shape[:2]
-    
-    # Use faster H.264 codec instead of FFV1 for speed
-    fourcc = cv2.VideoWriter_fourcc(*'FFV1')  # FFV1 is truly lossless
-    video_writer = cv2.VideoWriter(output_file, fourcc, fps, (video_width, video_height))
-    
-    # Generate and write frames directly with pre-calculated ranges
-    print("Generating frames...")
-    for t in range(TIME_STEPS):
-        frame_real = frames_real[t]
-        frame_imag = frames_imag[t]
-        frame_prob = frames_prob[t]
-        frame_phase = frames_phase[t]
-        
-        # Use pre-calculated global ranges - much faster than per-frame percentiles
-        abs_imag = np.abs(frame_imag)
-        
-        # Apply colormaps with global scaling
-        real_colored = apply_colormap(frame_real, 'coolwarm', real_global_min, real_global_max)
-        imag_colored = apply_colormap(abs_imag, 'plasma', imag_global_min, imag_global_max)
-        phase_colored = apply_colormap(frame_phase, 'twilight', -np.pi, np.pi)
-        
-        # Apply log scale to probability
-        log_prob = np.log10(np.maximum(frame_prob, 1e-10))  # Avoid log(0)
-        prob_colored = apply_probability_colormap(log_prob, log_prob_min, log_prob_max)
-
-        # Stitch frames horizontally
-        stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
-        
-        # Write frame to video
-        video_writer.write(stitched_frame)
-        
-        if t % 50 == 0:  # Reduced logging frequency
-            print(f"Generated frame {t}/{TIME_STEPS}")
-    
-    video_writer.release()
-    
-    print(f"Video saved as {output_file}")
-    print(f"Video specs: {video_width}x{video_height}, {fps} fps, {TIME_STEPS} frames")
 
 def open_video(video_path):
     """Open video with the default system video player"""

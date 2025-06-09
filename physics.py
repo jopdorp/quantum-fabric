@@ -98,7 +98,9 @@ def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA):
     psi_hat = np.fft.fft2(psi)
     psi_hat *= kinetic_phase
     psi = np.fft.ifft2(psi_hat)
-    psi *= potential_phase
+    # psi *= potential_phase
+    psi = psi * potential_phase
+
     
     return psi
 

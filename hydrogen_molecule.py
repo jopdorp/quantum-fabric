@@ -56,11 +56,13 @@ simulation = run_simulation(
     video_file="hydrogen_molecule.avi",
     fps=24,
     progress_callback=hydrogen_molecule_progress_callback,
-    electron_repulsion_strength=0.05,  # Moderate electron-electron repulsion
-    enable_nuclear_motion=True,        # Allow nuclear motion for molecular dynamics
-    orbital_mixing_strength=0.05,      # Weak orbital mixing to preserve molecular structure
-    mixing_frequency=600,              # Less frequent mixing for stability
-    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px)
+    electron_repulsion_strength=0.12,   # Moderate electron-electron repulsion
+    enable_nuclear_motion=True,         # Allow nuclear motion for molecular dynamics
+    orbital_mixing_strength=0.03,       # Very weak orbital mixing to preserve molecular structure
+    mixing_frequency=800,               # Less frequent mixing for stability
+    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px),
+    bond_spring_constant=0.02,          # Add harmonic bond stabilization
+    equilibrium_bond_length=40.0        # Target H-H bond length (pixels)
 )
 
 print("Hydrogen molecule simulation complete!")

@@ -82,7 +82,9 @@ class AtomSimulation:
                  enable_nuclear_motion: bool = False,
                  orbital_mixing_strength: float = 0.1,
                  mixing_frequency: int = 400,
-                 repulsion_sigmas: Union[float, Tuple[float, float]] = None):
+                 repulsion_sigmas: Union[float, Tuple[float, float]] = None,
+                 bond_spring_constant: float = 0.0,
+                 equilibrium_bond_length: float = None):
         """
         Initialize the atom simulation.
         
@@ -94,6 +96,8 @@ class AtomSimulation:
             orbital_mixing_strength: Strength of orbital mixing between electrons
             mixing_frequency: How often to apply orbital mixing (in steps)
             repulsion_sigmas: Either single sigma (backward compatibility) or tuple of (short_range_sigma, long_range_sigma)
+            bond_spring_constant: Spring constant for bond length stabilization (0 = disabled)
+            equilibrium_bond_length: Target bond length for stabilization (auto-detect if None)
         """
         self.nuclei = nuclei
         self.electrons = electrons
@@ -101,6 +105,15 @@ class AtomSimulation:
         self.enable_nuclear_motion = enable_nuclear_motion
         self.orbital_mixing_strength = orbital_mixing_strength
         self.mixing_frequency = mixing_frequency
+        self.bond_spring_constant = bond_spring_constant
+        
+        # Auto-detect equilibrium bond length from initial nuclear positions
+        if equilibrium_bond_length is None and len(nuclei) == 2:
+            dx = nuclei[1].position[0] - nuclei[0].position[0]
+            dy = nuclei[1].position[1] - nuclei[0].position[1]
+            self.equilibrium_bond_length = np.sqrt(dx**2 + dy**2)
+        else:
+            self.equilibrium_bond_length = equilibrium_bond_length
         
         # Auto-compute repulsion_sigma based on typical orbital size if not provided
         if repulsion_sigmas is None:
@@ -140,29 +153,57 @@ class AtomSimulation:
         """Compute forces on each nucleus from electrons and other nuclei."""
         forces = [np.zeros(2) for _ in self.nuclei]
         
-        # Forces from electrons
+        # Forces from ALL electrons (not just bound ones)
+        # This is crucial for proper molecular bonding forces
         for i, nucleus in enumerate(self.nuclei):
             for electron in self.electrons:
-                if electron.nucleus_index == i:  # Only electrons bound to this nucleus
-                    density = electron.get_density()
-                    force = compute_force_from_density(density, nucleus.position)
-                    forces[i] += force
+                # All electrons exert forces on all nuclei
+                density = electron.get_density()
+                force = compute_force_from_density(density, nucleus.position)
+                
+                # If electron is bound to this nucleus: attractive force (negative charge)
+                # If electron is bound to another nucleus: can be attractive (bonding) or repulsive
+                if electron.nucleus_index == i:
+                    forces[i] += force  # Attractive force from own electrons
+                else:
+                    # Inter-nuclear electron forces - these create molecular bonding
+                    # Increased coupling for stronger molecular bonds
+                    forces[i] += force * 0.6  # Increased from 0.3 to 0.6 for stronger bonding
         
         # Nuclear-nuclear forces (for molecules)
         if len(self.nuclei) > 1:
             for i, nucleus1 in enumerate(self.nuclei):
                 for j, nucleus2 in enumerate(self.nuclei):
                     if i != j:
-                        # Simple Coulomb repulsion between nuclei
+                        # Strong Coulomb repulsion between nuclei
                         dx = nucleus2.position[0] - nucleus1.position[0]
                         dy = nucleus2.position[1] - nucleus1.position[1]
                         r = np.sqrt(dx**2 + dy**2)
-                        r = max(r, 1.0)  # Prevent singularity
                         
-                        # Coulomb force: F = k*q1*q2/r^2
-                        force_magnitude = 2.0 * nucleus1.charge * nucleus2.charge / (r**3)
-                        forces[i][0] += force_magnitude * dx
-                        forces[i][1] += force_magnitude * dy
+                        # Prevent complete overlap with minimum separation
+                        r = max(r, 3.0)  # Minimum nuclear separation (3 pixels)
+                        
+                        # FIXED: Proper Coulomb force F = k*q1*q2/r^2 (not r^3!)
+                        # Much stronger coefficient to prevent nuclear overlap
+                        force_magnitude = 10.0 * nucleus1.charge * nucleus2.charge / (r**2)
+                        
+                        # Direction: repulsive (away from other nucleus)
+                        force_direction_x = dx / r  # Unit vector
+                        force_direction_y = dy / r
+                        
+                        forces[i][0] += force_magnitude * force_direction_x
+                        forces[i][1] += force_magnitude * force_direction_y
+                        
+                        # Add harmonic bond stabilization for diatomic molecules
+                        if (self.bond_spring_constant > 0 and 
+                            self.equilibrium_bond_length is not None and 
+                            len(self.nuclei) == 2):  # Only for diatomic molecules
+                            
+                            # Harmonic restoring force: F = -k*(r - r0)
+                            displacement = r - self.equilibrium_bond_length
+                            spring_force_magnitude = -self.bond_spring_constant * displacement / r
+                            forces[i][0] += spring_force_magnitude * dx
+                            forces[i][1] += spring_force_magnitude * dy
         
         return forces
     
@@ -209,6 +250,10 @@ class AtomSimulation:
             forces = self.compute_nuclear_forces()
             for i, nucleus in enumerate(self.nuclei):
                 nucleus.update_position(forces[i], dt=4.0)  # TIME_DELTA from config
+                
+                # Add velocity damping to prevent runaway oscillations
+                damping_factor = 0.995  # Slight velocity damping
+                nucleus.velocity *= damping_factor
     
     def get_combined_wavefunction(self, combination_method: str = "superposition") -> np.ndarray:
         """

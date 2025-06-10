@@ -1,5 +1,5 @@
 import numpy as np
-from config import POTENTIAL_STRENGTH, SCALE
+from config import POTENTIAL_STRENGTH, SCALE, SIZE
 
 def create_electron_wavepacket(x, y, cx, cy, sigma, momentum_x=0, momentum_y=0):
     """Create a simple electron wavepacket with optional momentum.
@@ -164,8 +164,21 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     # In our simulation units: a₀ ≈ 1/√(POTENTIAL_STRENGTH * Z_eff)
     bohr_radius = SCALE / np.sqrt(POTENTIAL_STRENGTH * z_eff)
     
-    # Orbital size scales with n² for hydrogen-like atoms
-    orbital_radius = bohr_radius * n**2
+    # # For carbon atoms, scale the radius to match simulation equilibrium
+    # # This prevents the "propulsion outward" effect
+    # if atomic_number > 1:
+    #     # Multi-electron atoms need smaller orbitals due to screening
+    #     bohr_radius *= 0.7  # Empirical correction for multi-electron atoms
+    
+    # # Orbital size scales with n² for hydrogen-like atoms
+    # orbital_radius = bohr_radius * n**2
+    
+    # # Additional size correction to ensure stability in the simulation
+    # # The orbital should be roughly 1/4 of the potential well size
+    # max_stable_radius = SIZE / 8  # pixels
+    # if orbital_radius > max_stable_radius:
+    #     orbital_radius = max_stable_radius
+    #     print(f"Warning: Orbital radius clamped to {max_stable_radius:.1f} pixels for stability")
     
     # Create coordinates relative to center
     dx = x - cx

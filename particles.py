@@ -83,12 +83,32 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     
     Creates an initial state that will evolve under the nuclear potential.
     The quantum numbers guide the initial conditions but don't predetermine the final shape.
+    
+    Args:
+        x, y: coordinate grids
+        cx, cy: center position (nucleus location)
+        radius_px: base orbital radius in pixels
+        quantum_numbers: (n, l, m) quantum numbers
+        atomic_number: nuclear charge Z (default: 1)
+        alpha: screening parameter for effective nuclear charge (default: orbital-dependent)
     """
     n, l, m = quantum_numbers
     atomic_number = kwargs.get('atomic_number', 1)
+    alpha = kwargs.get('alpha', None)
     
-    # Scale size based on atomic number (higher Z = smaller orbitals)
-    z_eff = atomic_number * 0.8  # Rough effective nuclear charge
+    # Default alpha based on orbital type if not provided
+    if alpha is None:
+        if l == 0:    # s orbitals
+            alpha = 0.35
+        elif l == 1:  # p orbitals  
+            alpha = 0.75
+        elif l == 2:  # d orbitals
+            alpha = 0.90
+        else:
+            alpha = 0.80  # fallback for higher orbitals
+    
+    # Scale size based on effective nuclear charge
+    z_eff = atomic_number * alpha
     scaled_radius = radius_px / z_eff**0.5
     
     # Create the initial wavepacket

@@ -231,13 +231,23 @@ The simulator provides functions for creating electron wavefunctions for arbitra
 
 ### 6.1 Core Functions
 
-**`create_atom_electron()`**: Creates electrons for any atomic system with proper nuclear charge scaling using **effective nuclear charge scaling** based on Slater's rules:
+**`create_atom_electron()`**: Creates electrons for any atomic system with configurable nuclear charge scaling:
 
-$$Z_{\text{eff}} = Z \cdot \alpha \quad \text{where } \alpha \approx 0.8$$
+$$Z_{\text{eff}} = Z \cdot \alpha$$
+
+Where α is **orbital-type dependent** and configurable:
+
+| Orbital Type | Typical α Range | Physical Basis |
+|--------------|-----------------|----------------|
+| s orbitals   | 0.30 - 0.40    | Heavy core screening |
+| p orbitals   | 0.65 - 0.85    | Moderate screening |
+| d orbitals   | 0.85 - 1.00    | Minimal screening |
 
 The orbital radius scales as: $r_{\text{scaled}} = r_{\text{base}}/Z_{\text{eff}}^{1/2}$
 
 **`create_orbital_electron()`**: Creates hydrogen-like orbitals with quantum number scaling: $r_{\text{eff}} = r_{\text{base}} \cdot n^{1.5}$
+
+**Recommended usage**: Pass α as a parameter based on orbital type and desired accuracy level.
 
 ### 6.2 Angular Momentum and Node Structure
 
@@ -247,11 +257,13 @@ The orbital radius scales as: $r_{\text{scaled}} = r_{\text{base}}/Z_{\text{eff}
 
 ### 6.3 Supported Atomic Systems
 
-| Element | Z | $Z_{\text{eff}}$ | Orbital Scaling | Ground State |
-|---------|---|------------------|-----------------|--------------|
-| Carbon  | 6 | 4.8             | $0.46 r_{\text{base}}$ | $1s^2 2s^2 2p^2$ |
-| Oxygen  | 8 | 6.4             | $0.39 r_{\text{base}}$ | $1s^2 2s^2 2p^4$ |
-| Lithium | 3 | 2.4             | $0.65 r_{\text{base}}$ | $1s^2 2s^1$ |
+| Element | Z | Default α | $Z_{\text{eff}}$ | Orbital Scaling | Ground State |
+|---------|---|-----------|------------------|-----------------|--------------|
+| Carbon  | 6 | 0.75 (2p) | 4.5             | $0.47 r_{\text{base}}$ | $1s^2 2s^2 2p^2$ |
+| Oxygen  | 8 | 0.75 (2p) | 6.0             | $0.41 r_{\text{base}}$ | $1s^2 2s^2 2p^4$ |
+| Lithium | 3 | 0.35 (2s) | 1.05            | $0.98 r_{\text{base}}$ | $1s^2 2s^1$ |
+
+**Note**: α values shown are defaults for the valence orbitals. Can be customized per orbital type.
 
 ### 6.4 Momentum Initialization
 

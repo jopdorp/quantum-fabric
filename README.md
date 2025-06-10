@@ -11,6 +11,34 @@ This project implements a real-time quantum wavefunction simulator capable of mo
 - Nuclear-nuclear interactions (Coulomb repulsion + strong force)
 - Quantum tunneling and orbital dynamics
 
+## Quick Start
+
+### Setup and Installation
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd waverfont-computer
+   ```
+
+2. **Create a virtual environment**:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Run the hydrogen atom simulation**:
+   ```bash
+   python hydrogen_atom.py
+   ```
+
+This will start the real-time hydrogen orbital simulation and create a video file showing the quantum wavefunction evolution.
+
 ## Physics and Mathematical Foundation
 
 ### 1. Time-Dependent Schrödinger Equation

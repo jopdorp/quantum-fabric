@@ -170,8 +170,8 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     #     # Multi-electron atoms need smaller orbitals due to screening
     #     bohr_radius *= 0.7  # Empirical correction for multi-electron atoms
     
-    # # Orbital size scales with n² for hydrogen-like atoms
-    # orbital_radius = bohr_radius * n**2
+    # Orbital size scales with n² for hydrogen-like atoms
+    orbital_radius = bohr_radius * n**2
     
     # # Additional size correction to ensure stability in the simulation
     # # The orbital should be roughly 1/4 of the potential well size

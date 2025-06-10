@@ -2,7 +2,7 @@ import numpy as np
 from video_utils import open_video
 from config import center_x, center_y, X, Y
 from particles import create_atom_electron
-from simulation import run_simulation, create_simple_atom_simulation
+from simulation import run_simulation, create_simple_atom_simulation, compute_repulsion_sigma_from_orbital_radius
 
 
 # Hydrogen nucleus position (pixels)
@@ -61,7 +61,8 @@ simulation = run_simulation(
     progress_callback=hydrogen_progress_callback,
     electron_repulsion_strength=0.0,  # No electron-electron repulsion for single electron
     enable_nuclear_motion=False,      # Nucleus stays fixed
-    orbital_mixing_strength=0.0       # No mixing for single electron
+    orbital_mixing_strength=0.0,      # No mixing for single electron
+    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px)
 )
 
 print("Hydrogen atom simulation complete!")

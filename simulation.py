@@ -8,7 +8,7 @@ electron-electron interactions and nuclear forces.
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from typing import List, Tuple, Dict, Optional, Callable
+from typing import List, Tuple, Dict, Optional, Callable, Union
 
 from config import TIME_STEPS, X, Y, SIZE
 from frame_utils import limit_frame
@@ -18,6 +18,25 @@ from physics import (
     propagate_wave_with_potential
 )
 from video_utils import StreamingVideoWriter, open_video
+
+
+def compute_repulsion_sigma_from_orbital_radius(orbital_radius_px: float) -> Tuple[float, float]:
+    """
+    Compute appropriate Gaussian sigmas for electron-electron repulsion based on orbital radius.
+    
+    Args:
+        orbital_radius_px: Orbital radius in pixels
+        
+    Returns:
+        Tuple of (short_range_sigma, long_range_sigma) for dual-range repulsion
+    """
+    # Short-range: orbital_radius / 6 with minimum of 2.0
+    # Long-range: orbital_radius / 1.5 with minimum of 8.0  
+    # This maintains the 1:4 ratio from physics.py (2:8) regardless of orbital size
+    short_range = max(2.0, orbital_radius_px / 6.0)
+    long_range = max(8.0, orbital_radius_px * 4.0 / 6.0)  # 4x the short range
+    
+    return short_range, long_range
 
 
 class Nucleus:
@@ -62,7 +81,8 @@ class AtomSimulation:
                  electron_repulsion_strength: float = 0.1,
                  enable_nuclear_motion: bool = False,
                  orbital_mixing_strength: float = 0.1,
-                 mixing_frequency: int = 400):
+                 mixing_frequency: int = 400,
+                 repulsion_sigmas: Union[float, Tuple[float, float]] = None):
         """
         Initialize the atom simulation.
         
@@ -73,6 +93,7 @@ class AtomSimulation:
             enable_nuclear_motion: Whether nuclei can move (for molecules)
             orbital_mixing_strength: Strength of orbital mixing between electrons
             mixing_frequency: How often to apply orbital mixing (in steps)
+            repulsion_sigmas: Either single sigma (backward compatibility) or tuple of (short_range_sigma, long_range_sigma)
         """
         self.nuclei = nuclei
         self.electrons = electrons
@@ -81,19 +102,37 @@ class AtomSimulation:
         self.orbital_mixing_strength = orbital_mixing_strength
         self.mixing_frequency = mixing_frequency
         
+        # Auto-compute repulsion_sigma based on typical orbital size if not provided
+        if repulsion_sigmas is None:
+            # Use helper function with default orbital radius to get dual sigmas
+            self.short_range_sigma, self.long_range_sigma = compute_repulsion_sigma_from_orbital_radius(12.0)  # Default orb_px=12
+        else:
+            # For backward compatibility, if single sigma provided, use it for short range and 4x for long range
+            if isinstance(repulsion_sigmas, (int, float)):
+                self.short_range_sigma = repulsion_sigmas
+                self.long_range_sigma = repulsion_sigmas * 4.0
+            else:
+                # Assume tuple of (short, long) sigmas
+                self.short_range_sigma, self.long_range_sigma = repulsion_sigmas
+        
         # Apply initial frame limits
         for electron in self.electrons:
             electron.wavefunction = limit_frame(electron.wavefunction)
     
     def compute_electron_electron_repulsion(self, target_electron_index: int) -> np.ndarray:
-        """Compute repulsive potential from other electrons."""
+        """Compute repulsive potential from other electrons using dual-range interactions."""
         repulsion = np.zeros_like(X, dtype=float)
         
         for i, other_electron in enumerate(self.electrons):
             if i != target_electron_index:
                 other_density = other_electron.get_density()
-                # Simple repulsion: Gaussian-smoothed density
-                repulsion += gaussian_filter(other_density, sigma=2.0)
+                
+                # Dual-range repulsion: short-range (strong) + long-range (weak)
+                # This matches the physics.py enhanced_electron_electron_repulsion approach
+                short_range_repulsion = gaussian_filter(other_density, sigma=self.short_range_sigma) * 2.0
+                long_range_repulsion = gaussian_filter(other_density, sigma=self.long_range_sigma) * 0.5
+                
+                repulsion += short_range_repulsion + long_range_repulsion
         
         return self.electron_repulsion_strength * repulsion
     

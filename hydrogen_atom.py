@@ -1,4 +1,5 @@
 import numpy as np
+import numpy as np
 from video_utils import StreamingVideoWriter, open_video
 from scipy.ndimage import gaussian_filter
 from config import TIME_STEPS, X, Y, center_x, center_y, SIZE, SCALE, SIGMA_AMPLIFIER
@@ -9,16 +10,39 @@ from physics import (
     propagate_wave_with_potential
 )
 from hydrogen_utils import create_hydrogen_orbital, eigen_states
+from particles import create_atom_electron
 
 
 # Hydrogen nucleus position (pixels)
 nucleus1_x, nucleus1_y = center_x, center_y
 
 # Initialize electrons - test different atoms and orbitals
-orb_px = 20
+orb_px = 12  # Match the scale used by hydrogen_eigenstate_3d_projected
 
-eigen_states = eigen_states[::-1]
-psi1 = create_hydrogen_orbital(eigen_states[0], X, Y, nucleus1_x, nucleus1_y, scale=orb_px)   # p_x + i*p_y
+# Comment out hydrogen-specific initialization
+# eigen_states = eigen_states[::-1]
+# psi1 = create_hydrogen_orbital(eigen_states[0], X, Y, nucleus1_x, nucleus1_y, scale=orb_px)   # p_x + i*p_y
+
+# Test 4 different hydrogen eigenstates using generic atom electron creation
+# All using atomic_number=1 (hydrogen) with different quantum numbers
+
+# Define 4 different hydrogen eigenstates to test
+hydrogen_eigenstates = [
+    (1, 0, 0),  # 1s orbital
+    (2, 0, 0),  # 2s orbital  
+    (2, 1, 0),  # 2p_z orbital
+    (3, 2, 1),  # 3d orbital
+]
+
+# Start with the first eigenstate (1s)
+current_eigenstate_index = 0
+current_quantum_numbers = hydrogen_eigenstates[current_eigenstate_index]
+print(f"Starting with eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
+
+# Create initial wavefunction using generic atom electron creation
+# For hydrogen, use alpha=1.0 since there's no electron screening
+psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, 
+                           current_quantum_numbers, atomic_number=1, alpha=1.0)
 
 # Uncomment to test other atoms:
 # 2. Carbon 2p orbital (more contracted due to higher Z_eff)
@@ -59,14 +83,22 @@ print(f"  - Sample memory: {memory_info['sample_memory_mb']:.1f} MB")
 pos1, v1 = np.array([nucleus1_x,nucleus1_y],float), np.zeros(2)
 print("Starting sim…")
 
-eigen_state_index = 0
 for step in range(TIME_STEPS):
     if step % 400 == 0:
         print(f"Step {step}/{TIME_STEPS}…")
-        eigen_state_index += 1
-        if eigen_state_index >= len(eigen_states):
-            break
-        psi1 = create_hydrogen_orbital(eigen_states[eigen_state_index], X, Y, nucleus1_x, nucleus1_y, scale=int(orb_px * 1 / (1 + eigen_state_index / 10)))
+        
+        # Cycle through the 4 different hydrogen eigenstates
+        current_eigenstate_index = (step // 400) % len(hydrogen_eigenstates)
+        current_quantum_numbers = hydrogen_eigenstates[current_eigenstate_index]
+        
+        print(f"Switching to eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
+        
+        # Create new wavefunction using generic atom electron creation
+        # For hydrogen, use alpha=1.0 since there's no electron screening
+        psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 
+                                   int(orb_px * 1 / (1 + current_eigenstate_index / 10)), 
+                                   current_quantum_numbers, atomic_number=1, alpha=1.0)
+        
     d1 = np.abs(psi1)**2
     f1 = compute_force_from_density(d1, pos1)
     V1 = create_nucleus_potential(X,Y,*pos1)

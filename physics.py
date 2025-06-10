@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 from scipy.ndimage import gaussian_filter
 from config import (

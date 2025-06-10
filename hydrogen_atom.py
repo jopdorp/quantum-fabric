@@ -122,7 +122,10 @@ eigen_states = [
     (4, 3, 1),  # 4f_x³
     (4, 3, 2),  # 4f_y³
     (4, 3, 3)   # 4f_z³
+    
 ]
+
+eigen_states = eigen_states[::-1]
 psi1 = create_hydrogen_orbital(eigen_states[0], X, Y, nucleus1_x, nucleus1_y, scale=orb_px)   # p_x + i*p_y
 
 # Uncomment to test other atoms:

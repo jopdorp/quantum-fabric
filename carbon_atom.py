@@ -26,22 +26,48 @@ orb_px = 12  # Match the scale used by hydrogen_eigenstate_3d_projected
 # All using atomic_number=1 (hydrogen) with different quantum numbers
 
 # Define 4 different hydrogen eigenstates to test
-hydrogen_eigenstates = [
-    (1, 0, 0),  # 1s orbital
-    (2, 0, 0),  # 2s orbital  
-    (2, 1, 0),  # 2p_z orbital
-    (3, 2, 1),  # 3d orbital
-]
+# hydrogen_eigenstates = [
+#     (1, 0, 0),  # 1s orbital
+#     (2, 0, 0),  # 2s orbital  
+#     (2, 1, 0),  # 2p_z orbital
+#     (3, 2, 1),  # 3d orbital
+# ]
 
 # Start with the first eigenstate (1s)
-current_eigenstate_index = 0
-current_quantum_numbers = hydrogen_eigenstates[current_eigenstate_index]
-print(f"Starting with eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
+# current_eigenstate_index = 0
+# current_quantum_numbers = hydrogen_eigenstates[current_eigenstate_index]
+# print(f"Starting with eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
 
 # Create initial wavefunction using generic atom electron creation
 # For hydrogen, use alpha=1.0 since there's no electron screening
-psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, 
-                           current_quantum_numbers, atomic_number=1, alpha=1.0)
+# psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, 
+#                            current_quantum_numbers, atomic_number=1, alpha=1.0)
+
+# Create all 6 electrons for Carbon atom (1s² 2s² 2p²)
+# Carbon electron configuration: 1s² 2s² 2p²
+
+# 1s orbital - 2 electrons (spin up and down)
+psi_1s_up = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 12, (1,0,0), atomic_number=6)
+psi_1s_down = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 12, (1,0,0), atomic_number=6)
+
+# 2s orbital - 2 electrons (spin up and down) 
+psi_2s_up = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 12, (2,0,0), atomic_number=6)
+psi_2s_down = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 12, (2,0,0), atomic_number=6)
+
+# 2p orbitals - 2 electrons (following Hund's rule: one in each orbital first)
+psi_2px = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 12, (2,1,1), atomic_number=6)   # 2p_x
+psi_2py = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 12, (2,1,-1), atomic_number=6)  # 2p_y
+
+# Combine all electrons into a single wavefunction
+# In reality, this is an approximation - true multi-electron wavefunctions are much more complex
+electrons = [psi_1s_up, psi_1s_down, psi_2s_up, psi_2s_down, psi_2px, psi_2py]
+
+# For simulation, we'll use the superposition of all electrons
+# (This is a simplified approach - real multi-electron atoms require Hartree-Fock or DFT)
+psi1 = sum(electrons) / len(electrons)  # Average all electron orbitals
+
+# Alternative: Focus on just the valence electrons (2p orbitals) for visualization
+# psi1 = (psi_2px + psi_2py) / 2
 
 # Uncomment to test other atoms:
 # 2. Carbon 2p orbital (more contracted due to higher Z_eff)
@@ -87,16 +113,16 @@ for step in range(TIME_STEPS):
         print(f"Step {step}/{TIME_STEPS}…")
         
         # Cycle through the 4 different hydrogen eigenstates
-        current_eigenstate_index = (step // 400) % len(hydrogen_eigenstates)
-        current_quantum_numbers = hydrogen_eigenstates[current_eigenstate_index]
+        # current_eigenstate_index = (step // 400) % len(hydrogen_eigenstates)
+        # current_quantum_numbers = hydrogen_eigenstates[current_eigenstate_index]
         
-        print(f"Switching to eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
+        # print(f"Switching to eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
         
-        # Create new wavefunction using generic atom electron creation
-        # For hydrogen, use alpha=1.0 since there's no electron screening
-        psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 
-                                   int(orb_px * 1 / (1 + current_eigenstate_index / 10)), 
-                                   current_quantum_numbers, atomic_number=1, alpha=1.0)
+        # # Create new wavefunction using generic atom electron creation
+        # # For hydrogen, use alpha=1.0 since there's no electron screening
+        # psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 
+        #                            int(orb_px * 1 / (1 + current_eigenstate_index / 10)), 
+        #                            current_quantum_numbers, atomic_number=1, alpha=1.0)
         
     d1 = np.abs(psi1)**2
     f1 = compute_force_from_density(d1, pos1)

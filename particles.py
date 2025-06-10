@@ -80,23 +80,42 @@ def create_orbital_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     return psi.astype(np.complex128)
 
 def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
-    """Create an electron for atomic simulation with proper hydrogen-like eigenstates.
+    """Create atomic orbital wavefunctions for any element using quantum mechanical principles.
     
-    Creates hydrogen-like atomic orbitals with proper 3D→2D projections:
+    This is a generic atomic orbital generator that works for:
+    - Hydrogen and hydrogen-like ions (He⁺, Li²⁺, etc.)
+    - Multi-electron atoms (C, N, O, etc.) using electron screening
+    - Any quantum numbers (n, l, m) with proper 3D→2D projections
+    
+    Features:
     - Radial part: Associated Laguerre polynomials with proper normalization
-    - Angular part: 3D spherical harmonics projected to 2D plane
-    
-    Works for hydrogen and hydrogen-like ions. For multi-electron atoms, uses
-    screening effects to approximate electron-electron interactions.
+    - Angular part: Real spherical harmonics projected to 2D plane  
+    - Physics-based orbital scaling using simulation parameters
+    - Automatic electron screening calculation using Slater's rules
+    - Support for custom electron configurations
     
     Args:
         x, y: coordinate grids
         cx, cy: center position (nucleus location)
-        radius_px: base orbital radius in pixels (usually ignored in favor of physics-based scaling)
+        radius_px: base orbital radius in pixels (auto-scaled by physics)
         quantum_numbers: (n, l, m) quantum numbers
-        atomic_number: nuclear charge Z (default: 1)
-        alpha: screening parameter for effective nuclear charge (default: auto-calculated)
-        electron_config: list of (n,l,occupancy) for screening calculation (optional)
+        atomic_number: nuclear charge Z (default: 1 for hydrogen)
+        alpha: screening parameter for Z_eff (default: auto-calculated)
+        electron_config: list of (n,l,occupancy) for Slater screening (optional)
+    
+    Returns:
+        Complex wavefunction representing the atomic orbital
+        
+    Examples:
+        # Hydrogen 1s orbital
+        psi = create_atom_electron(X, Y, cx, cy, 12, (1,0,0), atomic_number=1)
+        
+        # Carbon 2p orbital with screening
+        psi = create_atom_electron(X, Y, cx, cy, 12, (2,1,0), atomic_number=6)
+        
+        # Custom screening for lithium
+        psi = create_atom_electron(X, Y, cx, cy, 12, (2,0,0), 
+                                  atomic_number=3, alpha=0.31)
     """
     n, l, m = quantum_numbers
     atomic_number = kwargs.get('atomic_number', 1)

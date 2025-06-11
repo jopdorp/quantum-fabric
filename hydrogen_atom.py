@@ -1,6 +1,5 @@
-import numpy as np
-from video_utils import open_video
 from config import center_x, center_y, X, Y
+import config
 from particles import create_atom_electron
 from simulation import run_simulation, create_simple_atom_simulation, compute_repulsion_sigma_from_orbital_radius
 
@@ -40,9 +39,14 @@ def hydrogen_progress_callback(step, total_steps):
     if step % 400 == 0 and step > 0:
         # Cycle through the 4 different hydrogen eigenstates
         eigenstate_index = (step // 400) % len(hydrogen_eigenstates)
+        # adjust config.ZOOM for higher eigenstates
+        config.ZOOM = 10.0 * (1 + eigenstate_index)
+        # Recalculate SCALE since it depends on ZOOM
+        config.SCALE = config.BASE_SCALE / config.ZOOM
         quantum_numbers = hydrogen_eigenstates[eigenstate_index]
         
         print(f"Switching to eigenstate: n={quantum_numbers[0]}, l={quantum_numbers[1]}, m={quantum_numbers[2]}")
+        print(f"New ZOOM: {config.ZOOM}, new SCALE: {config.SCALE}")
         
         # Create new wavefunction
         scale_factor = int(orb_px * 1 / (1 + eigenstate_index / 10))

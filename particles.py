@@ -1,5 +1,6 @@
 import numpy as np
-from config import POTENTIAL_STRENGTH, SCALE, SIZE
+import config
+from config import POTENTIAL_STRENGTH, SIZE
 
 def create_electron_wavepacket(x, y, cx, cy, sigma, momentum_x=0, momentum_y=0):
     """Create a simple electron wavepacket with optional momentum.
@@ -162,7 +163,7 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     # Calculate physics-based Bohr radius
     # The stable orbital size is determined by the balance of kinetic and potential energy
     # In our simulation units: a₀ ≈ 1/√(POTENTIAL_STRENGTH * Z_eff)
-    bohr_radius = SCALE / np.sqrt(POTENTIAL_STRENGTH * z_eff)
+    bohr_radius = config.SCALE / np.sqrt(POTENTIAL_STRENGTH * z_eff)
     
     # # For carbon atoms, scale the radius to match simulation equilibrium
     # # This prevents the "propulsion outward" effect

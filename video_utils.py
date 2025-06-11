@@ -1,73 +1,121 @@
 import cv2
 import numpy as np
 import subprocess
+import torch
 from matplotlib import cm
 
-def normalize_to_uint8(data, vmin, vmax):
-    """Normalize data to 0-255 uint8 range - optimized version"""
+def normalize_to_uint8(data, vmin, vmax, device=None):
+    """Normalize data to 0-255 uint8 range - torch optimized version"""
+    # Ensure data is a torch tensor
+    if not isinstance(data, torch.Tensor):
+        data = torch.tensor(data, dtype=torch.float32)
+    
+    if device is None:
+        device = data.device
+    data = data.to(device)
+    
     # Handle edge case where vmin == vmax
     range_val = vmax - vmin
-    if np.abs(range_val) < 1e-10:
-        return np.full_like(data, 128, dtype=np.uint8)  # Return mid-gray
+    if abs(range_val) < 1e-10:
+        return torch.full_like(data, 128, dtype=torch.uint8)
     
     # Vectorized operations with direct uint8 conversion
-    # Avoid intermediate float64 arrays by using float32 and direct scaling
-    inv_range = np.float32(255.0 / range_val)
-    offset = np.float32(-vmin * inv_range)
+    inv_range = 255.0 / range_val
+    offset = -vmin * inv_range
     
     # Single operation: scale, offset, and clip in one step
-    # This avoids creating multiple intermediate arrays
     result = data * inv_range + offset
     
     # Clip and convert to uint8 in one operation
-    return np.clip(result, 0, 255).astype(np.uint8)
+    return torch.clamp(result, 0, 255).to(torch.uint8)
 
-def apply_colormap(data, colormap_name, vmin, vmax):
-    """Apply matplotlib colormap to data and convert to BGR - optimized version"""
-    normalized = normalize_to_uint8(data, vmin, vmax)
+def apply_colormap(data, colormap_name, vmin, vmax, device=None):
+    """Apply matplotlib colormap to torch tensor and convert to BGR - GPU optimized version"""
+    # Ensure data is a torch tensor
+    if not isinstance(data, torch.Tensor):
+        data = torch.tensor(data, dtype=torch.float32)
     
-    # Get colormap and create lookup table once
+    if device is None:
+        device = data.device
+    data = data.to(device)
+    
+    # Normalize to 0-255 range with torch operations
+    range_val = vmax - vmin
+    if abs(range_val) < 1e-10:
+        normalized = torch.full_like(data, 128, dtype=torch.uint8)
+    else:
+        inv_range = 255.0 / range_val
+        offset = -vmin * inv_range
+        result = data * inv_range + offset
+        normalized = torch.clamp(result, 0, 255).to(torch.uint8)
+    
+    # Create colormap LUT on the same device
     colormap = cm.get_cmap(colormap_name)
-    
-    # Pre-compute colormap LUT for all 256 values to avoid repeated calls
     lut_indices = np.arange(256, dtype=np.float32) / 255.0
     lut_rgba = colormap(lut_indices)
+    lut_bgr_np = (lut_rgba[:, [2, 1, 0]] * 255).astype(np.uint8)
+    lut_bgr = torch.tensor(lut_bgr_np, dtype=torch.uint8, device=device)
     
-    # Convert LUT to BGR uint8 format once
-    lut_bgr = (lut_rgba[:, [2, 1, 0]] * 255).astype(np.uint8)
+    # Store original shape for reshaping
+    original_shape = normalized.shape
     
-    # Use advanced indexing for ultra-fast lookup
-    # This is much faster than calling colormap() on every pixel
-    bgr = lut_bgr[normalized]
+    # Flatten for indexing, then reshape back
+    normalized_flat = normalized.flatten().long()  # Convert to long for proper indexing
+    
+    # Index into the lookup table (normalized_flat contains indices 0-255)
+    # lut_bgr has shape [256, 3], normalized_flat has shape [H*W]
+    # Result should have shape [H*W, 3]
+    bgr_flat = lut_bgr[normalized_flat]  # Shape: [H*W, 3]
+    
+    # Reshape back to original spatial dimensions plus color channel
+    bgr = bgr_flat.view(*original_shape, 3)  # Shape: [H, W, 3]
     
     return bgr
 
-def apply_probability_colormap(log_prob_data, vmin, vmax, power=2.5):
-    """Apply custom probability colormap that darkens low values while preserving high values - optimized version"""
-    # Normalize to 0-255 range directly
-    if np.abs(vmax - vmin) < 1e-10:
-        normalized_uint8 = np.full_like(log_prob_data, 128, dtype=np.uint8)
+def apply_probability_colormap(log_prob_data, vmin, vmax, power=2.5, device=None):
+    """Apply custom probability colormap using torch - GPU optimized version"""
+    # Ensure data is a torch tensor
+    if not isinstance(log_prob_data, torch.Tensor):
+        log_prob_data = torch.tensor(log_prob_data, dtype=torch.float32)
+    
+    if device is None:
+        device = log_prob_data.device
+    log_prob_data = log_prob_data.to(device)
+    
+    # Normalize to 0-255 range with torch operations
+    if abs(vmax - vmin) < 1e-10:
+        normalized_uint8 = torch.full_like(log_prob_data, 128, dtype=torch.uint8)
     else:
         # Normalize to 0-1 range first
         normalized = (log_prob_data - vmin) / (vmax - vmin)
-        normalized = np.clip(normalized, 0, 1)
+        normalized = torch.clamp(normalized, 0, 1)
         
         # Apply power transformation to darken low values
-        enhanced = np.power(normalized, power)
+        enhanced = torch.pow(normalized, power)
         
         # Convert to uint8 for LUT indexing
-        normalized_uint8 = (enhanced * 255).astype(np.uint8)
+        normalized_uint8 = (enhanced * 255).to(torch.uint8)
     
-    # Pre-compute colormap LUT with power transformation already applied
+    # Create colormap LUT on the same device
     colormap = cm.get_cmap('hot')
     lut_indices = np.arange(256, dtype=np.float32) / 255.0
     lut_rgba = colormap(lut_indices)
+    lut_bgr_np = (lut_rgba[:, [2, 1, 0]] * 255).astype(np.uint8)
+    lut_bgr = torch.tensor(lut_bgr_np, dtype=torch.uint8, device=device)
     
-    # Convert LUT to BGR uint8 format once
-    lut_bgr = (lut_rgba[:, [2, 1, 0]] * 255).astype(np.uint8)
+    # Store original shape for reshaping
+    original_shape = normalized_uint8.shape
     
-    # Use advanced indexing for ultra-fast lookup
-    bgr = lut_bgr[normalized_uint8]
+    # Flatten for indexing, then reshape back
+    normalized_flat = normalized_uint8.flatten().long()  # Convert to long for proper indexing
+    
+    # Index into the lookup table (normalized_flat contains indices 0-255)
+    # lut_bgr has shape [256, 3], normalized_flat has shape [H*W]
+    # Result should have shape [H*W, 3]
+    bgr_flat = lut_bgr[normalized_flat]  # Shape: [H*W, 3]
+    
+    # Reshape back to original spatial dimensions plus color channel
+    bgr = bgr_flat.view(*original_shape, 3)  # Shape: [H, W, 3]
     
     return bgr
 
@@ -162,10 +210,10 @@ class StreamingVideoWriter:
         sample_phase = np.zeros(frame_shape)
         sample_prob = np.zeros(frame_shape)
         
-        real_colored = apply_colormap(sample_real, 'coolwarm', self.real_global_min, self.real_global_max)
-        imag_colored = apply_colormap(sample_imag, 'plasma', self.imag_global_min, self.imag_global_max)
-        phase_colored = apply_colormap(sample_phase, 'twilight', -np.pi, np.pi)
-        prob_colored = apply_probability_colormap(sample_prob, self.log_prob_min, self.log_prob_max)
+        real_colored = apply_colormap(sample_real, 'coolwarm', self.real_global_min, self.real_global_max).cpu().numpy()
+        imag_colored = apply_colormap(sample_imag, 'plasma', self.imag_global_min, self.imag_global_max).cpu().numpy()
+        phase_colored = apply_colormap(sample_phase, 'twilight', -np.pi, np.pi).cpu().numpy()
+        prob_colored = apply_probability_colormap(sample_prob, self.log_prob_min, self.log_prob_max).cpu().numpy()
         
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])
         video_height, video_width = stitched_frame.shape[:2]
@@ -212,13 +260,13 @@ class StreamingVideoWriter:
         """Internal method to write a single frame to the video"""
         # Apply colormaps with pre-calculated global ranges
         abs_imag = np.abs(frame_imag)
-        real_colored = apply_colormap(frame_real, 'coolwarm', self.real_global_min, self.real_global_max)
-        imag_colored = apply_colormap(abs_imag, 'plasma', self.imag_global_min, self.imag_global_max)
-        phase_colored = apply_colormap(frame_phase, 'twilight', -np.pi, np.pi)
+        real_colored = apply_colormap(frame_real, 'coolwarm', self.real_global_min, self.real_global_max).cpu().numpy()
+        imag_colored = apply_colormap(abs_imag, 'plasma', self.imag_global_min, self.imag_global_max).cpu().numpy()
+        phase_colored = apply_colormap(frame_phase, 'twilight', -np.pi, np.pi).cpu().numpy()
         
         # Apply log scale to probability
         log_prob = np.log10(np.maximum(frame_prob, 1e-10))
-        prob_colored = apply_probability_colormap(log_prob, self.log_prob_min, self.log_prob_max, power=10)
+        prob_colored = apply_probability_colormap(log_prob, self.log_prob_min, self.log_prob_max, power=10).cpu().numpy()
         
         # Stitch frames horizontally
         stitched_frame = np.hstack([real_colored, imag_colored, phase_colored, prob_colored])

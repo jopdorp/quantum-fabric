@@ -10,8 +10,8 @@ TIME_DELTA = 4  # Reduced DT for richer time evolution
 POTENTIAL_STRENGTH = 0.6 # Coulomb strength * 10 to confine electrons
 MAX_GATES_PER_CELL = 10  # Quantum gates per cell
 
-# # Zoom configuration (visualization decoupled)
-ZOOM = 400.0
+# Zoom out configuration
+ZOOM = 10.0
 BASE_SCALE = 400.0
 SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
 
@@ -26,7 +26,3 @@ ELECTRON_REPULSION_STRENGTH = 0.08
 # --- Initial world state
 X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
 center_x, center_y = SIZE // 2, SIZE // 2
-
-### Unused utility variables, kept for reference
-BASE_SIGMA = 100
-SIGMA_AMPLIFIER = BASE_SIGMA / ZOOM  # smaller sigma → envelope decays slower in grid units

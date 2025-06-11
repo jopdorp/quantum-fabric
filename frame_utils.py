@@ -1,54 +1,69 @@
 import numpy as np
+import torch
 from config import SIZE, X, Y, center_x, center_y
 
-# Global cache for frequency grids to avoid recomputation
-_freq_grid_cache = {}
-
 def normalize_wavefunction(psi):
-    """Normalize psi so that sum(|psi|^2)==1"""
-    norm = np.sqrt(np.sum(np.abs(psi)**2))
+    """Normalize psi so that sum(|psi|^2)==1 - torch version"""
+    # Ensure data is a torch tensor
+    if not isinstance(psi, torch.Tensor):
+        psi = torch.tensor(psi, dtype=torch.complex64)
+    
+    norm = torch.sqrt(torch.sum(torch.abs(psi)**2))
     return psi / norm if norm > 0 else psi
 
-def apply_low_pass_filter(psi, cutoff):
-    """Optimized low-pass filter with cached frequency grids"""
+def apply_low_pass_filter(psi, cutoff, device=None):
+    """Torch-optimized low-pass filter with cached frequency grids"""
+    # Ensure data is a torch tensor
+    if not isinstance(psi, torch.Tensor):
+        psi = torch.tensor(psi, dtype=torch.complex64)
+    
+    if device is None:
+        device = psi.device
+    psi = psi.to(device)
+    
     shape = psi.shape
-    cache_key = (shape[0], shape[1])
+
+    # Pre-compute and cache frequency grid on the correct device
+    kx = torch.fft.fftfreq(shape[1], device=device) * (2 * torch.pi)
+    ky = torch.fft.fftfreq(shape[0], device=device) * (2 * torch.pi)
+    KX, KY = torch.meshgrid(kx, ky, indexing='xy')
+    k_squared = KX**2 + KY**2
+
     
-    # Check if frequency grid is already computed for this shape
-    if cache_key not in _freq_grid_cache:
-        # Pre-compute and cache frequency grid
-        kx = np.fft.fftfreq(shape[1]) * (2 * np.pi)
-        ky = np.fft.fftfreq(shape[0]) * (2 * np.pi)
-        KX, KY = np.meshgrid(kx, ky, indexing='xy')
-        k_squared = KX**2 + KY**2
-        _freq_grid_cache[cache_key] = k_squared
-    else:
-        k_squared = _freq_grid_cache[cache_key]
-    
-    # Apply filter
-    psi_hat = np.fft.fft2(psi)
+    # Apply filter using torch FFT
+    psi_hat = torch.fft.fft2(psi)
     mask = k_squared <= cutoff**2
-    return np.fft.ifft2(psi_hat * mask)
+    return torch.fft.ifft2(psi_hat * mask)
 
 def apply_absorbing_edge(psi, strength=1):
-    # Circular absorbing mask - starts gentle, becomes total at frame edges
-    r = np.sqrt((X - center_x)**2 + (Y - center_y)**2)
+    """Apply absorbing edge boundary - torch version"""
+    # Ensure data is a torch tensor
+    if not isinstance(psi, torch.Tensor):
+        psi = torch.tensor(psi, dtype=torch.complex64)
+    
+    device = psi.device
+    
+    # Convert coordinate grids to torch tensors on the same device
+    x_tensor = torch.tensor(X, dtype=torch.float32, device=device)
+    y_tensor = torch.tensor(Y, dtype=torch.float32, device=device)
+    
+    r = torch.sqrt((x_tensor - center_x)**2 + (y_tensor - center_y)**2)
     
     # Start absorption at 80% of max possible radius, total absorption at frame edge
     max_radius = min(center_x, center_y, SIZE - center_x, SIZE - center_y)
     absorption_start = max_radius * 0.7
     absorption_end = max_radius * 0.96  # Ensure total absorption before frame edge
     
-    mask = np.ones(psi.shape, dtype=np.float32)
+    mask = torch.ones(psi.shape, dtype=torch.float32, device=device)
     
     # Only apply absorption in outer region
     outer_region = r > absorption_start
-    if np.any(outer_region):
+    if torch.any(outer_region):
         # Smooth exponential absorption that ramps up toward edges
         absorption_depth = (r[outer_region] - absorption_start) / (absorption_end - absorption_start)
-        absorption_depth = np.clip(absorption_depth, 0, 1)
+        absorption_depth = torch.clamp(absorption_depth, 0, 1)
         # Exponential curve for strong absorption near edges
-        mask[outer_region] = np.exp(-strength * absorption_depth**3)
+        mask[outer_region] = torch.exp(-strength * absorption_depth**3)
     
     return psi * mask
 

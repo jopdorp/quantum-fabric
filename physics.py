@@ -1,7 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import numpy as np
-import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 from scipy.ndimage import gaussian_filter
 from config import (
@@ -36,22 +34,20 @@ def add_mean_field_coulomb_repulsion(source_psi, strength=0.05, sigma=5):
     repulsion = gaussian_filter(charge_density, sigma=sigma)
     return strength * repulsion
 
-
-def compute_force_from_density(density, pos):
-    dx = X - pos[0]; dy = Y - pos[1]
-    r = np.sqrt(dx**2 + dy**2); r = np.maximum(r, 1.0)
-    fx = np.sum((dx / r**3) * density)
-    fy = np.sum((dy / r**3) * density)
-    return np.array([fx, fy])
-
 def compute_force_from_density(charge_density, nucleus_pos):
-    """Compute forces on nucleus from electron density."""
+    """Compute forces on nucleus from electron density - supports torch tensors."""
+    # Convert to numpy if it's a torch tensor
+    if hasattr(charge_density, 'cpu'):  # Check if it's a torch tensor
+        charge_density_np = charge_density.cpu().numpy()
+    else:
+        charge_density_np = charge_density
+    
     dx = X - nucleus_pos[0]
     dy = Y - nucleus_pos[1]
     r = np.sqrt(dx**2 + dy**2)
     r = np.maximum(r, 1.0)
-    force_x = np.sum((dx / r**3) * charge_density)
-    force_y = np.sum((dy / r**3) * charge_density)
+    force_x = np.sum((dx / r**3) * charge_density_np)
+    force_y = np.sum((dy / r**3) * charge_density_np)
     return np.array([force_x, force_y])
 
 def compute_nuclear_force(nucleus1_pos, nucleus2_pos):
@@ -72,42 +68,7 @@ def compute_nuclear_force(nucleus1_pos, nucleus2_pos):
     
     return coulomb_force + nuclear_attraction
 
-# Global cache for kinetic phase arrays to avoid recomputation
-_kinetic_phase_cache = {}
-
-def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA):
-    """Optimized wave propagation using split-step Fourier method with caching"""
-    # Cache key based on shape and dt
-    shape = psi.shape
-    cache_key = (shape[0], shape[1], dt)
-    
-    # Check if kinetic phase is already computed for this shape and dt
-    if cache_key not in _kinetic_phase_cache:
-        # Pre-compute and cache kinetic phase array
-        kx = np.fft.fftfreq(shape[1], d=1.0) * (2 * np.pi)
-        ky = np.fft.fftfreq(shape[0], d=1.0) * (2 * np.pi)
-        KX, KY = np.meshgrid(kx, ky, indexing='xy')
-        kinetic_phase = np.exp(-1j * dt * (KX**2 + KY**2) * 0.5)
-        _kinetic_phase_cache[cache_key] = kinetic_phase
-    else:
-        kinetic_phase = _kinetic_phase_cache[cache_key]
-    
-    # Pre-compute potential phase (half time step)
-    potential_phase = np.exp(-1j * dt * potential * 0.5)
-    
-    # Split-step propagation: V/2 -> T -> V/2
-    psi *= potential_phase
-    psi_hat = np.fft.fft2(psi)
-    psi_hat *= kinetic_phase
-    psi = np.fft.ifft2(psi_hat)
-    # psi *= potential_phase
-    psi = psi * potential_phase
-
-    
-    return psi
-
 ### Some unused utility functions below, kept for reference
-
 def enhanced_electron_electron_repulsion(psi1, psi2, electron_repulsion_strength=0.1):
     """Enhanced electron-electron repulsion with better physical modeling."""
     density1 = np.abs(psi1)**2

@@ -7,6 +7,7 @@ electron-electron interactions and nuclear forces.
 """
 
 import numpy as np
+import torch
 from scipy.ndimage import gaussian_filter
 from typing import List, Tuple, Dict, Optional, Callable, Union
 
@@ -15,8 +16,8 @@ from frame_utils import limit_frame
 from physics import (
     create_nucleus_potential,
     compute_force_from_density,
-    propagate_wave_with_potential
 )
+from torch_physics import propagate_wave_with_potential
 from video_utils import StreamingVideoWriter, open_video
 
 
@@ -63,13 +64,21 @@ class Electron:
         self.name = name
         self.nucleus_index = nucleus_index  # Which nucleus this electron is bound to
         
-    def get_density(self) -> np.ndarray:
+    def get_density(self) -> torch.Tensor:
         """Get the probability density of this electron."""
-        return np.abs(self.wavefunction)**2
+        # Ensure data is a torch tensor
+        if not isinstance(self.wavefunction, torch.Tensor):
+            self.wavefunction = torch.tensor(self.wavefunction, dtype=torch.complex64)
+        
+        return torch.abs(self.wavefunction)**2
         
     def normalize(self):
         """Normalize the wavefunction."""
-        norm = np.sqrt(np.sum(np.abs(self.wavefunction)**2))
+        # Ensure data is a torch tensor
+        if not isinstance(self.wavefunction, torch.Tensor):
+            self.wavefunction = torch.tensor(self.wavefunction, dtype=torch.complex64)
+        
+        norm = torch.sqrt(torch.sum(torch.abs(self.wavefunction)**2))
         if norm > 0:
             self.wavefunction = self.wavefunction / norm
 
@@ -140,10 +149,16 @@ class AtomSimulation:
             if i != target_electron_index:
                 other_density = other_electron.get_density()
                 
+                # Convert to numpy if it's a torch tensor
+                if hasattr(other_density, 'cpu'):  # Check if it's a torch tensor
+                    other_density_np = other_density.cpu().numpy()
+                else:
+                    other_density_np = other_density
+                
                 # Dual-range repulsion: short-range (strong) + long-range (weak)
                 # This matches the physics.py enhanced_electron_electron_repulsion approach
-                short_range_repulsion = gaussian_filter(other_density, sigma=self.short_range_sigma) * 2.0
-                long_range_repulsion = gaussian_filter(other_density, sigma=self.long_range_sigma) * 0.5
+                short_range_repulsion = gaussian_filter(other_density_np, sigma=self.short_range_sigma) * 2.0
+                long_range_repulsion = gaussian_filter(other_density_np, sigma=self.long_range_sigma) * 0.5
                 
                 repulsion += short_range_repulsion + long_range_repulsion
         
@@ -339,10 +354,19 @@ def run_simulation(nuclei: List[Nucleus], electrons: List[Electron],
         combined_psi = sim.get_combined_wavefunction("superposition")
         
         # Create video frames
-        frame_real = np.real(combined_psi)
-        frame_imag = np.imag(combined_psi)
-        frame_phase = np.angle(gaussian_filter(combined_psi, sigma=1))
-        frame_prob = np.abs(combined_psi)**2
+        if isinstance(combined_psi, torch.Tensor):
+            # Convert to numpy for video processing
+            combined_psi_np = combined_psi.cpu().numpy()
+            frame_real = np.real(combined_psi_np)
+            frame_imag = np.imag(combined_psi_np)
+            frame_phase = np.angle(gaussian_filter(combined_psi_np, sigma=1))
+            frame_prob = np.abs(combined_psi_np)**2
+        else:
+            frame_real = np.real(combined_psi)
+            frame_imag = np.imag(combined_psi)
+            frame_phase = np.angle(gaussian_filter(combined_psi, sigma=1))
+            frame_prob = np.abs(combined_psi)**2
+        
         frame_prob = frame_prob / np.max(frame_prob) if np.max(frame_prob) > 0 else frame_prob
         
         video_writer.add_frame(frame_real, frame_imag, frame_phase, frame_prob)

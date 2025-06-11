@@ -1,7 +1,7 @@
 import numpy as np
 from config import center_x, center_y, X, Y
 from particles import create_atom_electron
-from simulation import run_simulation, Nucleus, Electron, compute_repulsion_sigma_from_orbital_radius
+from simulation import run_simulation, Nucleus, Electron, get_default_repulsion_sigmas
 
 
 # Hydrogen molecule H2 setup
@@ -60,7 +60,7 @@ simulation = run_simulation(
     enable_nuclear_motion=True,         # Allow nuclear motion for molecular dynamics
     orbital_mixing_strength=0.03,       # Very weak orbital mixing to preserve molecular structure
     mixing_frequency=800,               # Less frequent mixing for stability
-    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px),
+    repulsion_sigmas=get_default_repulsion_sigmas(),
     bond_spring_constant=0.02,          # Add harmonic bond stabilization
     equilibrium_bond_length=40.0        # Target H-H bond length (pixels)
 )

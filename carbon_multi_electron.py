@@ -1,7 +1,7 @@
 import numpy as np
 from config import center_x, center_y, X, Y
 from particles import create_atom_electron
-from simulation import run_simulation, Nucleus, Electron, compute_repulsion_sigma_from_orbital_radius
+from simulation import run_simulation, Nucleus, Electron, get_default_repulsion_sigmas
 
 
 # Carbon nucleus position (pixels)
@@ -45,7 +45,7 @@ simulation = run_simulation(
     enable_nuclear_motion=False,      # Keep nuclei fixed
     orbital_mixing_strength=0.1,      # Enable orbital mixing for dynamics (matches original)
     mixing_frequency=400,             # Mix orbitals every 400 steps (matches original)
-    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px)
+    repulsion_sigmas=get_default_repulsion_sigmas()
 )
 
 print("Multi-electron Carbon simulation complete!")

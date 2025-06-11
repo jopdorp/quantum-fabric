@@ -21,21 +21,27 @@ from torch_physics import propagate_wave_with_potential
 from video_utils import StreamingVideoWriter, open_video
 
 
-def compute_repulsion_sigma_from_orbital_radius(orbital_radius_px: float) -> Tuple[float, float]:
+def get_default_repulsion_sigmas() -> Tuple[float, float]:
     """
-    Compute appropriate Gaussian sigmas for electron-electron repulsion based on orbital radius.
+    Get default Gaussian sigmas for electron-electron repulsion scaled to simulation size.
     
-    Args:
-        orbital_radius_px: Orbital radius in pixels
-        
     Returns:
         Tuple of (short_range_sigma, long_range_sigma) for dual-range repulsion
     """
-    # Short-range: orbital_radius / 6 with minimum of 2.0
-    # Long-range: orbital_radius / 1.5 with minimum of 8.0  
-    # This maintains the 1:4 ratio from physics.py (2:8) regardless of orbital size
-    short_range = max(2.0, orbital_radius_px / 6.0)
-    long_range = max(8.0, orbital_radius_px * 4.0 / 6.0)  # 4x the short range
+    from config import SCALE
+    
+    # Scale sigmas with the simulation scale
+    # Base values that work well at standard scale, then scale proportionally
+    base_short_range = 2.0
+    base_long_range = 8.0
+    
+    # Scale with SCALE to maintain proper physics at different zoom levels
+    short_range = base_short_range * SCALE / 100.0  # Assuming SCALE ~100 is "standard"
+    long_range = base_long_range * SCALE / 100.0
+    
+    # Ensure minimum values for numerical stability
+    short_range = max(1.0, short_range)
+    long_range = max(4.0, long_range)
     
     return short_range, long_range
 
@@ -126,8 +132,8 @@ class AtomSimulation:
         
         # Auto-compute repulsion_sigma based on typical orbital size if not provided
         if repulsion_sigmas is None:
-            # Use helper function with default orbital radius to get dual sigmas
-            self.short_range_sigma, self.long_range_sigma = compute_repulsion_sigma_from_orbital_radius(12.0)  # Default orb_px=12
+            # Use default sigmas that work well for atomic simulations
+            self.short_range_sigma, self.long_range_sigma = get_default_repulsion_sigmas()
         else:
             # For backward compatibility, if single sigma provided, use it for short range and 4x for long range
             if isinstance(repulsion_sigmas, (int, float)):

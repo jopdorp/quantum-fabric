@@ -2,160 +2,126 @@ import numpy as np
 import config
 from config import POTENTIAL_STRENGTH, SIZE
 
-def create_electron_wavepacket(x, y, cx, cy, sigma, momentum_x=0, momentum_y=0):
-    """Create a simple electron wavepacket with optional momentum.
-    
-    Args:
-        x, y: coordinate grids
-        cx, cy: center position
-        sigma: width of the wavepacket
-        momentum_x, momentum_y: initial momentum
-    """
-    dx = x - cx
-    dy = y - cy
-    r_squared = dx*dx + dy*dy
-    
-    # Gaussian wavepacket
-    psi = np.exp(-r_squared / (2 * sigma**2))
-    
-    # Add momentum via phase
-    if momentum_x != 0 or momentum_y != 0:
-        psi *= np.exp(1j * (momentum_x * dx + momentum_y * dy))
-    
-    return psi.astype(np.complex128)
 
-def create_electron_with_angular_momentum(x, y, cx, cy, sigma, angular_momentum=0):
-    """Create an electron with angular momentum (rotation).
+def apply_wavefunction_dynamics(psi, x, y, cx, cy, momentum_x=0.05, momentum_y=0.2, 
+                               orbital_offset_x=0.-1, orbital_offset_y=0.2):
+    """Apply momentum and orbital offset effects to an existing wavefunction.
+    
+    This function adds dynamic behavior to a static orbital wavefunction by:
+    - Adding momentum components (creates traveling wave behavior)
+    - Applying orbital offset (shifts the orbital center for asymmetric potentials)
     
     Args:
+        psi: existing complex wavefunction array
         x, y: coordinate grids  
-        cx, cy: center position
-        sigma: width of the wavepacket
-        angular_momentum: integer angular momentum quantum number
+        cx, cy: original center position (nucleus location)
+        momentum_x, momentum_y: initial momentum components
+        orbital_offset_x, orbital_offset_y: offset the orbital center
+    
+    Returns:
+        Modified complex wavefunction with dynamics applied
     """
-    dx = x - cx
-    dy = y - cy
-    r_squared = dx*dx + dy*dy
-    theta = np.arctan2(dy, dx)
+    # Calculate coordinates relative to offset center
+    actual_cx = cx + orbital_offset_x
+    actual_cy = cy + orbital_offset_y
+    dx = x - actual_cx
+    dy = y - actual_cy
     
-    # Gaussian radial part
-    radial = np.exp(-r_squared / (2 * sigma**2))
+    # Apply momentum for dynamic behavior
+    if momentum_x != 0 or momentum_y != 0:
+        psi = psi * np.exp(1j * (momentum_x * dx + momentum_y * dy))
     
-    # Angular momentum creates rotation
-    angular = np.exp(1j * angular_momentum * theta)
-    
-    return (radial * angular).astype(np.complex128)
-
-def create_orbital_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
-    """Create an electron wavepacket with initial angular momentum and energy.
-    
-    The physics simulation will then evolve this according to the potential.
-    """
-    n, l, m = quantum_numbers
-    
-    # Start with a localized wavepacket at the appropriate scale
-    # The radius scales roughly with n^2 for quantum states
-    effective_radius = radius_px * (n**1.5)  # Larger for higher n
-    
-    # Create base wavepacket
-    psi = create_electron_wavepacket(x, y, cx, cy, effective_radius)
-    
-    # Add angular momentum if requested
-    if l > 0 and m != 0:
-        dx = x - cx
-        dy = y - cy
-        theta = np.arctan2(dy, dx)
-        psi *= np.exp(1j * m * theta)
-    
-    # Add some radial structure for higher n (nodes)
-    if n > 1:
-        dx = x - cx
-        dy = y - cy
-        r = np.sqrt(dx*dx + dy*dy)
+    # If orbital was offset, we need to shift the wavefunction
+    if orbital_offset_x != 0 or orbital_offset_y != 0:
+        # Create phase shift to move the orbital
+        dx_shift = x - cx  # Original center coordinates
+        dy_shift = y - cy
         
-        # Simple radial modulation to encourage node formation
-        # This will evolve naturally under the physics
-        radial_modulation = np.cos(np.pi * r / effective_radius * (n-1))
-        psi *= (1 + 0.3 * radial_modulation)
+        # Apply spatial shift by interpolating the wavefunction
+        # For small offsets, we can approximate with a phase modulation
+        if abs(orbital_offset_x) < 5 and abs(orbital_offset_y) < 5:
+            # Small offset approximation
+            shift_phase = 1j * (orbital_offset_x * dx_shift + orbital_offset_y * dy_shift) / 10
+            psi = psi * np.exp(shift_phase)
+    
+    # Ensure proper normalization 
+    norm_factor = np.sqrt(np.sum(np.abs(psi)**2))
+    if norm_factor > 0:
+        psi = psi / norm_factor
     
     return psi.astype(np.complex128)
 
-def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
+
+def create_atom_electron(x, y, cx, cy, quantum_numbers, **kwargs):
     """Create atomic orbital wavefunctions for any element using quantum mechanical principles.
     
     This is a generic atomic orbital generator that works for:
     - Hydrogen and hydrogen-like ions (He⁺, Li²⁺, etc.)
-    - Multi-electron atoms (C, N, O, etc.) using electron screening
+    - Multi-electron atoms (C, N, O, etc.) using simple electron screening
     - Any quantum numbers (n, l, m) with proper 3D→2D projections
     
     Features:
     - Radial part: Associated Laguerre polynomials with proper normalization
     - Angular part: Real spherical harmonics projected to 2D plane  
     - Physics-based orbital scaling using simulation parameters
-    - Automatic electron screening calculation using Slater's rules
-    - Support for custom electron configurations
+    - Simple universal electron screening based on orbital type and nuclear charge
+    
+    For dynamic behavior (momentum, orbital offset), use apply_wavefunction_dynamics() 
+    after creating the static orbital.
     
     Args:
         x, y: coordinate grids
         cx, cy: center position (nucleus location)
-        radius_px: base orbital radius in pixels (auto-scaled by physics)
         quantum_numbers: (n, l, m) quantum numbers
         atomic_number: nuclear charge Z (default: 1 for hydrogen)
         alpha: screening parameter for Z_eff (default: auto-calculated)
-        electron_config: list of (n,l,occupancy) for Slater screening (optional)
     
     Returns:
         Complex wavefunction representing the atomic orbital
         
     Examples:
         # Hydrogen 1s orbital
-        psi = create_atom_electron(X, Y, cx, cy, 12, (1,0,0), atomic_number=1)
+        psi = create_atom_electron(X, Y, cx, cy, (1,0,0), atomic_number=1)
         
-        # Carbon 2p orbital with screening
-        psi = create_atom_electron(X, Y, cx, cy, 12, (2,1,0), atomic_number=6)
+        # Carbon 2p orbital
+        psi = create_atom_electron(X, Y, cx, cy, (2,1,0), atomic_number=6)
         
-        # Custom screening for lithium
-        psi = create_atom_electron(X, Y, cx, cy, 12, (2,0,0), 
-                                  atomic_number=3, alpha=0.31)
+        # Add dynamics after creation
+        psi = apply_wavefunction_dynamics(psi, X, Y, cx, cy, momentum_x=0.1, orbital_offset_x=2)
     """
     n, l, m = quantum_numbers
     atomic_number = kwargs.get('atomic_number', 1)
     alpha = kwargs.get('alpha', None)
-    electron_config = kwargs.get('electron_config', None)
     
-    # Calculate screening parameter (alpha) for multi-electron atoms
+    # Calculate screening parameter (alpha) using a simple universal formula
     if alpha is None:
         if atomic_number == 1:
             # Pure hydrogen - no screening
             alpha = 1.0
-        elif electron_config is not None:
-            # Calculate screening from electron configuration using Slater's rules
-            alpha = calculate_slater_screening(atomic_number, n, l, electron_config)
         else:
-            # Use orbital-dependent default screening for common atoms
-            screening_rules = {
-                # Format: atomic_number: {(n,l): alpha_value}
-                3: {(1,0): 0.31, (2,0): 0.31},  # Lithium
-                4: {(1,0): 0.31, (2,0): 0.31},  # Beryllium  
-                6: {(1,0): 0.31, (2,0): 0.64, (2,1): 0.64},  # Carbon
-                7: {(1,0): 0.31, (2,0): 0.64, (2,1): 0.64},  # Nitrogen
-                8: {(1,0): 0.31, (2,0): 0.64, (2,1): 0.64},  # Oxygen
-                9: {(1,0): 0.31, (2,0): 0.64, (2,1): 0.64},  # Fluorine
-                10: {(1,0): 0.31, (2,0): 0.64, (2,1): 0.64}, # Neon
-            }
+            # Simple universal screening: inner electrons reduce effective charge
+            # For multi-electron atoms, each inner electron screens ~0.3-0.9 of nuclear charge
+            # Core electrons (1s, 2s, 2p) screen more effectively than valence electrons
             
-            if atomic_number in screening_rules and (n,l) in screening_rules[atomic_number]:
-                alpha = screening_rules[atomic_number][(n,l)]
-            else:
-                # Fallback: orbital-dependent screening
-                if l == 0:    # s orbitals
-                    alpha = 0.35
-                elif l == 1:  # p orbitals  
-                    alpha = 0.75
-                elif l == 2:  # d orbitals
-                    alpha = 0.90
-                else:
-                    alpha = 0.80  # fallback for higher orbitals
+            # Count inner electrons (rough approximation)
+            inner_electrons = max(0, atomic_number - 2)  # Subtract valence electrons
+            
+            # Screening efficiency depends on orbital type
+            if l == 0:    # s orbitals penetrate more, less screening
+                screening_per_electron = 0.25
+            elif l == 1:  # p orbitals
+                screening_per_electron = 0.35  
+            elif l == 2:  # d orbitals
+                screening_per_electron = 0.45
+            else:         # f and higher orbitals
+                screening_per_electron = 0.50
+            
+            # Additional screening for higher n (outer orbitals)
+            n_factor = 1.0 + 0.1 * (n - 1)
+            
+            total_screening = inner_electrons * screening_per_electron * n_factor
+            z_eff = atomic_number - total_screening
+            alpha = max(z_eff / atomic_number, 0.1)  # Prevent negative screening
     
     # Calculate effective nuclear charge
     z_eff = atomic_number * alpha
@@ -165,13 +131,7 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     # In our simulation units: a₀ ≈ 1/√(POTENTIAL_STRENGTH * Z_eff)
     bohr_radius = config.SCALE / np.sqrt(POTENTIAL_STRENGTH * z_eff)
     
-    # # For carbon atoms, scale the radius to match simulation equilibrium
-    # # This prevents the "propulsion outward" effect
-    # if atomic_number > 1:
-    #     # Multi-electron atoms need smaller orbitals due to screening
-    #     bohr_radius *= 0.7  # Empirical correction for multi-electron atoms
-    
-    # Orbital size scales with n² for hydrogen-like atoms
+    # Orbital size scales with n² for all atoms (using effective nuclear charge)
     orbital_radius = bohr_radius * n**2
     
     # # Additional size correction to ensure stability in the simulation
@@ -187,10 +147,11 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     r = np.sqrt(dx**2 + dy**2)
     theta = np.arctan2(dy, dx)
     
-    # Create hydrogen-like radial wavefunction using general formula
+    # Create atomic radial wavefunction using effective nuclear charge
     rho = 2 * z_eff * r / (n * orbital_radius)  # Proper dimensionless radius
     
-    # General hydrogen-like radial function with Laguerre polynomials
+    # General atomic radial function with Laguerre polynomials
+    # This works for any atom using the effective nuclear charge Z_eff
     from scipy.special import genlaguerre
     import math
     
@@ -203,7 +164,7 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
         # Fallback for very high quantum numbers - use simpler approximation
         radial = (rho**l) * np.exp(-rho/2) * (1 + 0.5 * np.cos(np.pi * rho * (n-l-1)))
     
-    # Create angular part - proper 3D→2D projections like hydrogen_utils.py
+    # Create angular part - proper 3D→2D orbital projections
     if l == 0:  # s orbitals
         angular = 1.0 + 0j  # Spherically symmetric
         
@@ -239,9 +200,12 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     # Combine radial and angular parts
     psi = radial * angular
     
-    # Add gentle envelope like in hydrogen_utils.py for better visualization
+    # Add gentle envelope for better visualization
     envelope = np.exp(-r**2/(2*(orbital_radius*0.6)**2))
     psi = psi * envelope
+    
+    # Ensure psi is complex before applying perturbations
+    psi = psi.astype(np.complex128)
     
     # Ensure proper normalization 
     norm_factor = np.sqrt(np.sum(np.abs(psi)**2))
@@ -250,47 +214,5 @@ def create_atom_electron(x, y, cx, cy, radius_px, quantum_numbers, **kwargs):
     
     return psi.astype(np.complex128)
 
-def calculate_slater_screening(atomic_number, n, l, electron_config):
-    """Calculate Slater screening parameter using Slater's rules.
-    
-    Args:
-        atomic_number: Nuclear charge Z
-        n, l: Principal and angular quantum numbers of the orbital
-        electron_config: List of (n, l, occupancy) tuples for filled orbitals
-    
-    Returns:
-        alpha: Screening parameter (Z_eff = Z * alpha)
-    """
-    # Slater's rules for screening
-    sigma = 0.0  # Total screening constant
-    
-    for config_n, config_l, occupancy in electron_config:
-        if occupancy == 0:
-            continue
-            
-        # Same shell (n,l)
-        if config_n == n and config_l == l:
-            sigma += 0.35 * (occupancy - 1)  # Other electrons in same subshell
-            
-        # Lower shells
-        elif config_n < n:
-            if n == 1:
-                continue  # No screening for 1s
-            elif n == 2:
-                sigma += 0.85 * occupancy  # 1s screens 2s/2p by 0.85
-            elif n >= 3:
-                if config_n == n - 1:
-                    sigma += 0.85 * occupancy  # (n-1) shell screens by 0.85
-                else:
-                    sigma += 1.0 * occupancy   # Inner shells screen completely
-                    
-        # Same n, lower l (for p, d, f orbitals)
-        elif config_n == n and config_l < l:
-            sigma += 0.35 * occupancy
-    
-    # Effective nuclear charge
-    z_eff = atomic_number - sigma
-    alpha = z_eff / atomic_number
-    
-    return max(alpha, 0.1)  # Prevent negative or zero screening
+
 

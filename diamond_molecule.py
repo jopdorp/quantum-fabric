@@ -1,7 +1,7 @@
 import numpy as np
 from config import center_x, center_y, X, Y
 from particles import create_atom_electron
-from simulation import run_simulation, Nucleus, Electron, compute_repulsion_sigma_from_orbital_radius
+from simulation import run_simulation, Nucleus, Electron, get_default_repulsion_sigmas
 
 
 # Diamond crystal cluster simulation
@@ -131,7 +131,7 @@ simulation = run_simulation(
     enable_nuclear_motion=True,         # Allow nuclear motion for crystal dynamics
     orbital_mixing_strength=0.08,       # Moderate orbital mixing for sp3 hybridization
     mixing_frequency=300,               # Frequent mixing to simulate covalent bonding
-    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px)
+    repulsion_sigmas=get_default_repulsion_sigmas()
 )
 
 print("Diamond crystal simulation complete!")

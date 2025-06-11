@@ -1,12 +1,11 @@
 from config import center_x, center_y, X, Y
 import config
-from particles import create_atom_electron
-from simulation import run_simulation, create_simple_atom_simulation, compute_repulsion_sigma_from_orbital_radius
+from particles import create_atom_electron, apply_wavefunction_dynamics
+from simulation import run_simulation, create_simple_atom_simulation, get_default_repulsion_sigmas
 
 
 # Hydrogen nucleus position (pixels)
 nucleus1_x, nucleus1_y = center_x, center_y
-orb_px = 12
 
 print("Creating Hydrogen atom simulation...")
 
@@ -23,8 +22,8 @@ current_quantum_numbers = hydrogen_eigenstates[0]
 print(f"Starting with eigenstate: n={current_quantum_numbers[0]}, l={current_quantum_numbers[1]}, m={current_quantum_numbers[2]}")
 
 # Create initial electron wavefunction
-psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, 
-                           current_quantum_numbers, atomic_number=1, alpha=1.0)
+psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, current_quantum_numbers, atomic_number=1, alpha=1.0)
+psi1 = apply_wavefunction_dynamics(psi1, X, Y, nucleus1_x, nucleus1_y)
 
 # Create simple atom simulation
 nuclei, electrons = create_simple_atom_simulation(
@@ -49,9 +48,7 @@ def hydrogen_progress_callback(step, total_steps):
         print(f"New ZOOM: {config.ZOOM}, new SCALE: {config.SCALE}")
         
         # Create new wavefunction
-        scale_factor = int(orb_px * 1 / (1 + eigenstate_index / 10))
-        new_psi = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, 
-                                     scale_factor, quantum_numbers, atomic_number=1, alpha=1.0)
+        new_psi = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, quantum_numbers, atomic_number=1, alpha=1.0)
         
         # Update the electron wavefunction in the simulation
         electrons[0].wavefunction = new_psi
@@ -66,7 +63,7 @@ simulation = run_simulation(
     electron_repulsion_strength=0.0,  # No electron-electron repulsion for single electron
     enable_nuclear_motion=False,      # Nucleus stays fixed
     orbital_mixing_strength=0.0,      # No mixing for single electron
-    repulsion_sigmas=compute_repulsion_sigma_from_orbital_radius(orb_px)
+    repulsion_sigmas=get_default_repulsion_sigmas()
 )
 
 print("Hydrogen atom simulation complete!")

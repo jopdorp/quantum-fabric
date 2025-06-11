@@ -1,4 +1,3 @@
-import numpy as np
 from config import center_x, center_y, X, Y
 from particles import create_atom_electron
 from simulation import run_simulation, Nucleus, Electron, get_default_repulsion_sigmas
@@ -16,12 +15,10 @@ nucleus1_y = center_y
 nucleus2_x = center_x + bond_length // 2
 nucleus2_y = center_y
 
-orb_px = 30  # Base orbital radius
-
 # Create hydrogen 1s orbitals for each electron
 # Each electron is initially localized around one nucleus
-psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, orb_px, (1,0,0), atomic_number=1, alpha=1.0)
-psi2 = create_atom_electron(X, Y, nucleus2_x, nucleus2_y, orb_px, (1,0,0), atomic_number=1, alpha=1.0)
+psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, (1,0,0), atomic_number=1, alpha=1.0)
+psi2 = create_atom_electron(X, Y, nucleus2_x, nucleus2_y, (1,0,0), atomic_number=1, alpha=1.0)
 
 # Create nuclei
 nuclei = [

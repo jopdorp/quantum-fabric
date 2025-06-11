@@ -1,10 +1,13 @@
+import math
 import numpy as np
+from scipy.special import genlaguerre
+from scipy.special import sph_harm
+
 import config
 from config import POTENTIAL_STRENGTH, SIZE
 
-
 def apply_wavefunction_dynamics(psi, x, y, cx, cy, momentum_x=0.05, momentum_y=0.2, 
-                               orbital_offset_x=0.-1, orbital_offset_y=0.2):
+                               orbital_offset_x=0.1, orbital_offset_y=0.2):
     """Apply momentum and orbital offset effects to an existing wavefunction.
     
     This function adds dynamic behavior to a static orbital wavefunction by:
@@ -134,13 +137,6 @@ def create_atom_electron(x, y, cx, cy, quantum_numbers, **kwargs):
     # Orbital size scales with n² for all atoms (using effective nuclear charge)
     orbital_radius = bohr_radius * n**2
     
-    # # Additional size correction to ensure stability in the simulation
-    # # The orbital should be roughly 1/4 of the potential well size
-    # max_stable_radius = SIZE / 8  # pixels
-    # if orbital_radius > max_stable_radius:
-    #     orbital_radius = max_stable_radius
-    #     print(f"Warning: Orbital radius clamped to {max_stable_radius:.1f} pixels for stability")
-    
     # Create coordinates relative to center
     dx = x - cx
     dy = y - cy
@@ -150,52 +146,53 @@ def create_atom_electron(x, y, cx, cy, quantum_numbers, **kwargs):
     # Create atomic radial wavefunction using effective nuclear charge
     rho = 2 * z_eff * r / (n * orbital_radius)  # Proper dimensionless radius
     
-    # General atomic radial function with Laguerre polynomials
-    # This works for any atom using the effective nuclear charge Z_eff
-    from scipy.special import genlaguerre
-    import math
-    
-    # Prevent overflow for very large factorials by using safe computation
+    # Use proper Laguerre polynomials for accurate radial shapes
     try:
         norm_factor = np.sqrt((2*z_eff/(n*orbital_radius))**3 * math.factorial(n-l-1) / (2*n*math.factorial(n+l)))
         laguerre_poly = genlaguerre(n-l-1, 2*l+1)(rho)
         radial = norm_factor * (rho**l) * np.exp(-rho/2) * laguerre_poly
     except (OverflowError, ValueError):
-        # Fallback for very high quantum numbers - use simpler approximation
-        radial = (rho**l) * np.exp(-rho/2) * (1 + 0.5 * np.cos(np.pi * rho * (n-l-1)))
+        # Fallback for very high quantum numbers - enhanced with oscillations
+        oscillations = 1 + 0.8 * np.cos(np.pi * rho * (n-l-1) / n) + 0.3 * np.cos(2*np.pi * rho * (n-l-1) / n)
+        radial = (rho**l) * np.exp(-rho/2) * oscillations
     
-    # Create angular part - proper 3D→2D orbital projections
-    if l == 0:  # s orbitals
-        angular = 1.0 + 0j  # Spherically symmetric
+    # Create angular part - proper 3D→2D orbital projections with distinct shapes
+    if l == 0:  # s orbitals - spherically symmetric
+        angular = 1.0 + 0j
         
-    elif l == 1:  # p orbitals - proper projections
+    elif l == 1:  # p orbitals - distinct dumbbell patterns
         if m == -1:
-            # p_x - i*p_y → creates lobe at 45° angle
-            angular = np.cos(theta - np.pi/4) * np.exp(1j * theta)
+            # p_y orbital → vertical dumbbell
+            angular = np.sin(theta)
         elif m == 0:
-            # p_z → when projected to xy-plane, creates dipole pattern
-            angular = np.cos(theta)  # Creates two-lobe pattern along x-axis
+            # p_z → when projected to xy-plane, creates horizontal dumbbell
+            angular = np.cos(theta)
         elif m == 1:
-            # p_x + i*p_y → creates lobe at -45° angle  
-            angular = np.cos(theta + np.pi/4) * np.exp(-1j * theta)
+            # p_x orbital → rotated dumbbell at 45°
+            angular = np.cos(theta + np.pi/4)
             
-    elif l == 2:  # d orbitals - copy approach from hydrogen_utils.py
+    elif l == 2:  # d orbitals - cloverleaf and other complex patterns
         if m == -2:
-            angular = np.sin(2*theta) * np.exp(2j * theta)  # d_xy
+            # d_xy orbital → 4-lobe cloverleaf rotated
+            angular = np.sin(2*theta)
         elif m == -1:
-            angular = np.sin(theta) * np.cos(theta) * np.exp(1j * theta)  # d_xz/d_yz
+            # d_yz orbital → 4-lobe pattern
+            angular = np.sin(theta) * np.cos(theta)
         elif m == 0:
-            angular = (3*np.cos(theta)**2 - 1)  # d_z² → cloverleaf in 2D
+            # d_z² orbital → distinctive pattern with central lobe and ring
+            angular = (3*np.cos(theta)**2 - 1) + 0.5*np.sin(2*theta)
         elif m == 1:
-            angular = np.sin(theta) * np.cos(theta) * np.exp(-1j * theta)  # d_xz/d_yz
+            # d_xz orbital → different 4-lobe orientation
+            angular = np.sin(theta) * np.sin(theta + np.pi/2)
         elif m == 2:
-            angular = np.cos(2*theta) * np.exp(-2j * theta)  # d_x²-y²
+            # d_x²-y² orbital → 4-lobe cloverleaf aligned with axes
+            angular = np.cos(2*theta)
             
-    else:  # Higher l orbitals - use spherical harmonics
-        from scipy.special import sph_harm
-        phi = theta
-        # For 2D projection, use theta=π/2 (xy-plane)
-        angular = sph_harm(m, l, phi, np.pi/2)
+    else:  # Higher l orbitals - create more complex patterns
+        # Create increasingly complex angular patterns for higher l
+        base_pattern = np.cos(l * theta) + 0.5 * np.sin((l+1) * theta)
+        m_modulation = np.cos(m * theta + np.pi/4)
+        angular = base_pattern * m_modulation
     
     # Combine radial and angular parts
     psi = radial * angular

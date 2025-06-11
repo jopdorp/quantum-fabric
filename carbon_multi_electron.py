@@ -6,31 +6,39 @@ from simulation import run_simulation, Nucleus, Electron, get_default_repulsion_
 
 # Carbon nucleus position (pixels)
 nucleus1_x, nucleus1_y = center_x, center_y
-orb_px = 12
+print("Creating Carbon multi-electron system with all 6 electrons...")
 
-print("Creating Carbon multi-electron system...")
-
-# Create separate electrons that will evolve independently
-# We'll focus on the 3 valence p-electrons for visual clarity
-
-# 2p orbitals - 3 separate electrons with slight spatial offsets to avoid overlap
+# Create all 6 electrons according to carbon's electron configuration: 1s² 2s² 2p²
 # Add slight spatial offsets so electrons don't overlap completely
-offset_distance = 5  # pixels
+offset_distance = 15  # pixels
 
-psi_2px_shifted = create_atom_electron(X, Y, nucleus1_x + offset_distance, nucleus1_y, 12, (2,1,1), atomic_number=6)
-psi_2py_shifted = create_atom_electron(X, Y, nucleus1_x - offset_distance, nucleus1_y + offset_distance, 12, (2,1,-1), atomic_number=6)
-psi_2pz_shifted = create_atom_electron(X, Y, nucleus1_x, nucleus1_y - offset_distance, 12, (2,1,0), atomic_number=6)
+# 1s orbital - 2 electrons (filled shell)
+psi_1s_1 = create_atom_electron(X, Y, nucleus1_x + 3, nucleus1_y + 3, (1,0,0), atomic_number=6)
+psi_1s_2 = create_atom_electron(X, Y, nucleus1_x - 3, nucleus1_y - 3, (1,0,0), atomic_number=6)
+
+# 2s orbital - 2 electrons (filled shell)
+psi_2s_1 = create_atom_electron(X, Y, nucleus1_x + 8, nucleus1_y + 8, (2,0,0), atomic_number=6)
+psi_2s_2 = create_atom_electron(X, Y, nucleus1_x - 8, nucleus1_y - 8, (2,0,0), atomic_number=6)
+
+# 2p orbitals - 2 electrons (partially filled, following Hund's rule)
+psi_2px = create_atom_electron(X, Y, nucleus1_x + offset_distance, nucleus1_y, (2,1,1), atomic_number=6)
+psi_2py = create_atom_electron(X, Y, nucleus1_x - offset_distance, nucleus1_y + offset_distance, (2,1,-1), atomic_number=6)
 
 # Create single carbon nucleus (charge = 6 protons)
 carbon_nucleus = Nucleus(nucleus1_x, nucleus1_y, charge=6)
 nuclei = [carbon_nucleus]
 
-# Create electrons - all bound to the same carbon nucleus
-# The electrons are created at offset positions but all feel the same central nucleus
+# Create electrons - all 6 electrons bound to the carbon nucleus
 electrons = [
-    Electron(psi_2px_shifted, "2p_x", nucleus_index=0),
-    Electron(psi_2py_shifted, "2p_y", nucleus_index=0),
-    Electron(psi_2pz_shifted, "2p_z", nucleus_index=0)
+    # 1s orbital - 2 electrons
+    Electron(psi_1s_1, "1s_1", nucleus_index=0),
+    Electron(psi_1s_2, "1s_2", nucleus_index=0),
+    # 2s orbital - 2 electrons  
+    Electron(psi_2s_1, "2s_1", nucleus_index=0),
+    Electron(psi_2s_2, "2s_2", nucleus_index=0),
+    # 2p orbitals - 2 electrons (following Hund's rule)
+    Electron(psi_2px, "2p_x", nucleus_index=0),
+    Electron(psi_2py, "2p_y", nucleus_index=0)
 ]
 
 print("Starting multi-electron simulation...")

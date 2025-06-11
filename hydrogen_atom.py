@@ -35,7 +35,7 @@ nuclei, electrons = create_simple_atom_simulation(
 
 # Custom progress callback to cycle through eigenstates
 def hydrogen_progress_callback(step, total_steps):
-    if step % 400 == 0 and step > 0:
+    if step % 200 == 0 and step > 0:
         # Cycle through the 4 different hydrogen eigenstates
         eigenstate_index = (step // 400) % len(hydrogen_eigenstates)
         # adjust config.ZOOM for higher eigenstates
@@ -49,6 +49,7 @@ def hydrogen_progress_callback(step, total_steps):
         
         # Create new wavefunction
         new_psi = create_atom_electron(X, Y, nucleus1_x, nucleus1_y, quantum_numbers, atomic_number=1, alpha=1.0)
+        new_psi = apply_wavefunction_dynamics(new_psi, X, Y, nucleus1_x, nucleus1_y)
         
         # Update the electron wavefunction in the simulation
         electrons[0].wavefunction = new_psi

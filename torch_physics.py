@@ -58,6 +58,22 @@ class WavePropagationModel(nn.Module):
         psi = psi * potential_phase
         
         return psi
+        
+    def forward_batch(self, psi_batch, potential_batch):
+        """Batched split-step propagation for multiple electrons simultaneously"""
+        # psi_batch shape: [N_electrons, H, W]
+        # potential_batch shape: [N_electrons, H, W]
+        
+        potential_phase = torch.exp(-1j * self.dt * potential_batch * 0.5)
+        
+        # Split-step propagation with batching
+        psi_batch = psi_batch * potential_phase
+        psi_hat_batch = torch.fft.fft2(psi_batch, dim=(-2, -1))  # FFT over spatial dims
+        psi_hat_batch = psi_hat_batch * self.kinetic_phase.unsqueeze(0)  # Broadcast kinetic phase
+        psi_batch = torch.fft.ifft2(psi_hat_batch, dim=(-2, -1))
+        psi_batch = psi_batch * potential_phase
+        
+        return psi_batch
 
 class LaplacianWaveModel(nn.Module):
     def __init__(self, shape, dt=TIME_DELTA, device=DEVICE):
@@ -82,36 +98,43 @@ class LaplacianWaveModel(nn.Module):
         # We'll use h=1 and ℏ²/(2m) = 0.5 for simplicity
         self.kinetic_factor = 0.5
         
-    def forward(self, psi, potential):
+    def forward_batch(self, psi_batch, potential_batch):
         """
-        Time evolution using operator splitting with finite differences:
+        Batched time evolution using operator splitting with finite differences:
         ψ(t+dt) ≈ exp(-i*dt*V/2) * exp(-i*dt*T) * exp(-i*dt*V/2) * ψ(t)
         """
         # Split-step: V/2 -> T -> V/2
-        potential_phase_half = torch.exp(-1j * self.dt * potential * 0.5)
+        potential_phase_half = torch.exp(-1j * self.dt * potential_batch * 0.5)
         
         # Step 1: Apply potential for half time step
-        psi = psi * potential_phase_half
+        psi_batch = psi_batch * potential_phase_half
         
         # Step 2: Apply kinetic operator using finite differences
-        # Add batch and channel dimensions for conv2d
-        psi_batched = psi.unsqueeze(0).unsqueeze(0)  # Shape: [1, 1, H, W]
+        # Add batch and channel dimensions for conv2d if needed
+        if len(psi_batch.shape) == 3:  # [N, H, W]
+            psi_batched = psi_batch.unsqueeze(1)  # Shape: [N, 1, H, W]
+        else:
+            psi_batched = psi_batch
         
         # Apply Laplacian via convolution with padding
+        # Fix: Don't use grouped convolution, just apply the same kernel to all batch elements
         laplacian_psi = torch.nn.functional.conv2d(
             psi_batched, 
-            self.laplacian_kernel, 
+            self.laplacian_kernel,  # Same kernel for all
             padding=1
-        ).squeeze(0).squeeze(0)  # Remove batch/channel dims
+        )
+        
+        if len(psi_batch.shape) == 3:  # Remove channel dim if we added it
+            laplacian_psi = laplacian_psi.squeeze(1)
         
         # Kinetic evolution: exp(-i*dt*T) where T = -∇²/2
         kinetic_phase = torch.exp(1j * self.dt * self.kinetic_factor * laplacian_psi)
-        psi = psi * kinetic_phase
+        psi_batch = psi_batch * kinetic_phase
         
         # Step 3: Apply potential for remaining half time step  
-        psi = psi * potential_phase_half
+        psi_batch = psi_batch * potential_phase_half
         
-        return psi
+        return psi_batch
 
 _wave_model = None  # Global variable to hold the wave model instance
 # Update the model selection
@@ -144,3 +167,51 @@ def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA, device=DEVICE):
         # Convert back to numpy array
         return result.cpu().numpy()  
     return result
+
+def propagate_wave_batch_with_potentials(psi_list, potential_list, dt=TIME_DELTA, device=DEVICE):
+    """
+    Batched wave propagation for multiple electrons simultaneously.
+    This is much faster than calling propagate_wave_with_potential in a loop.
+    
+    Args:
+        psi_list: List of wave functions [psi1, psi2, ...]
+        potential_list: List of potentials [V1, V2, ...]
+        dt: Time step
+        device: Device to run on
+        
+    Returns:
+        List of propagated wave functions
+    """
+    if len(psi_list) == 0:
+        return []
+    
+    # Check if inputs are numpy arrays to determine output format
+    is_numpy = isinstance(psi_list[0], np.ndarray)
+    
+    # Convert all to torch tensors and stack into batches
+    psi_tensors = []
+    potential_tensors = []
+    
+    for psi, potential in zip(psi_list, potential_list):
+        psi_tensor = convert_to_device(psi, device)
+        potential_tensor = convert_to_device(potential, device)
+        psi_tensors.append(psi_tensor)
+        potential_tensors.append(potential_tensor)
+    
+    # Stack into batch tensors: [N_electrons, H, W]
+    psi_batch = torch.stack(psi_tensors, dim=0)
+    potential_batch = torch.stack(potential_tensors, dim=0)
+    
+    # Get model and propagate batch
+    model = get_wave_model(psi_batch.shape[1:], dt, device)  # Shape without batch dim
+    result_batch = model.forward_batch(psi_batch, potential_batch)
+    
+    # Convert back to list
+    result_list = []
+    for i in range(result_batch.shape[0]):
+        result = result_batch[i]
+        if is_numpy:
+            result = result.cpu().numpy()
+        result_list.append(result)
+    
+    return result_list

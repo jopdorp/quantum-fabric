@@ -17,7 +17,7 @@ from physics import (
     create_nucleus_potential,
     compute_force_from_density,
 )
-from torch_physics import propagate_wave_with_potential
+from torch_physics import propagate_wave_with_potential, propagate_wave_batch_with_potentials
 from video_utils import StreamingVideoWriter, open_video
 
 
@@ -70,13 +70,22 @@ class Electron:
         self.name = name
         self.nucleus_index = nucleus_index  # Which nucleus this electron is bound to
         
-    def get_density(self) -> torch.Tensor:
+    def get_density(self) -> np.ndarray:
         """Get the probability density of this electron."""
-        # Ensure data is a torch tensor
-        if not isinstance(self.wavefunction, torch.Tensor):
-            self.wavefunction = torch.tensor(self.wavefunction, dtype=torch.complex64)
+        wf = self.wavefunction
         
-        return torch.abs(self.wavefunction)**2
+        # Handle torch tensors
+        if hasattr(wf, 'cpu'):  # Check if it's a torch tensor
+            wf = wf.cpu().numpy()
+        
+        # Ensure 2D array (remove any batch dimensions)
+        if wf.ndim > 2:
+            # If there's a batch dimension, take the first element
+            wf = wf[0] if wf.shape[0] == 1 else wf.squeeze()
+        
+        # Calculate density
+        density = np.abs(wf)**2
+        return density
         
     def normalize(self):
         """Normalize the wavefunction."""
@@ -153,22 +162,66 @@ class AtomSimulation:
         
         for i, other_electron in enumerate(self.electrons):
             if i != target_electron_index:
-                other_density = other_electron.get_density()
-                
-                # Convert to numpy if it's a torch tensor
-                if hasattr(other_density, 'cpu'):  # Check if it's a torch tensor
-                    other_density_np = other_density.cpu().numpy()
-                else:
-                    other_density_np = other_density
+                other_density = other_electron.get_density()  # Now always returns numpy array
                 
                 # Dual-range repulsion: short-range (strong) + long-range (weak)
                 # This matches the physics.py enhanced_electron_electron_repulsion approach
-                short_range_repulsion = gaussian_filter(other_density_np, sigma=self.short_range_sigma) * 2.0
-                long_range_repulsion = gaussian_filter(other_density_np, sigma=self.long_range_sigma) * 0.5
+                short_range_repulsion = gaussian_filter(other_density, sigma=self.short_range_sigma) * 2.0
+                long_range_repulsion = gaussian_filter(other_density, sigma=self.long_range_sigma) * 0.5
                 
                 repulsion += short_range_repulsion + long_range_repulsion
         
         return self.electron_repulsion_strength * repulsion
+
+    def compute_all_electron_repulsions(self) -> List[np.ndarray]:
+        """Compute electron-electron repulsions for all electrons simultaneously (fully vectorized)."""
+        n_electrons = len(self.electrons)
+        if n_electrons <= 1:
+            return [np.zeros_like(X, dtype=float) for _ in self.electrons]
+        
+        # Get all electron densities at once and stack them
+        densities = []
+        for electron in self.electrons:
+            density = electron.get_density()  # Now always returns numpy array
+            # Ensure density is always 2D
+            if density.ndim > 2:
+                density = density.squeeze()
+            if density.ndim > 2:
+                # If still > 2D, take the first 2D slice
+                density = density[0]
+            densities.append(density)
+        
+        # Stack densities for vectorized operations
+        densities_array = np.stack(densities, axis=0)  # Shape: [n_electrons, height, width]
+        
+        # Vectorized gaussian filtering for all densities at once
+        # Apply gaussian filter to individual densities to maintain correct shape
+        short_range_filtered = []
+        long_range_filtered = []
+        
+        for density in densities:  # Use original densities list, not stacked array
+            # Ensure density is 2D before filtering
+            assert density.ndim == 2, f"Density should be 2D, got shape {density.shape}"
+            short_filtered = gaussian_filter(density, sigma=self.short_range_sigma)
+            long_filtered = gaussian_filter(density, sigma=self.long_range_sigma)
+            short_range_filtered.append(short_filtered)
+            long_range_filtered.append(long_filtered)
+        
+        # Compute repulsions for all electrons simultaneously
+        repulsions = []
+        for i in range(n_electrons):
+            # Sum contributions from all other electrons
+            repulsion = np.zeros_like(X, dtype=float)
+            
+            for j in range(n_electrons):
+                if i != j:
+                    # Dual-range repulsion: short-range (strong) + long-range (weak)
+                    repulsion += (short_range_filtered[j] * 2.0 + 
+                                long_range_filtered[j] * 0.5)
+            
+            repulsions.append(self.electron_repulsion_strength * repulsion)
+        
+        return repulsions
     
     def compute_nuclear_forces(self) -> List[np.ndarray]:
         """Compute forces on each nucleus from electrons and other nuclei."""
@@ -246,12 +299,19 @@ class AtomSimulation:
                 electron.normalize()
     
     def evolve_step(self, step: int):
-        """Evolve the system by one time step."""
+        """Evolve the system by one time step using batched wave propagation."""
         
         # Apply orbital mixing for dynamics
         self.apply_orbital_mixing(step)
         
-        # Evolve each electron
+        # Prepare batch data for all electrons
+        psi_list = []
+        potential_list = []
+        
+        # Compute all electron-electron repulsions at once
+        electron_repulsions = self.compute_all_electron_repulsions()
+        
+        # Build potentials for each electron
         for i, electron in enumerate(self.electrons):
             # Get the nucleus this electron is bound to
             nucleus = self.nuclei[electron.nucleus_index]
@@ -259,12 +319,25 @@ class AtomSimulation:
             # Create nuclear potential
             V = create_nucleus_potential(X, Y, *nucleus.position, nucleus.charge)
             
-            # Add electron-electron repulsion
-            V += self.compute_electron_electron_repulsion(i)
+            # Add electron-electron repulsion (pre-computed)
+            V += electron_repulsions[i]
             
-            # Propagate wavefunction
-            electron.wavefunction = propagate_wave_with_potential(electron.wavefunction, V)
-            electron.wavefunction = limit_frame(electron.wavefunction)
+            # Add to batch
+            psi_list.append(electron.wavefunction)
+            potential_list.append(V)
+        
+        # Use batched wave propagation for better performance
+        if len(self.electrons) > 0:
+            # Propagate all electrons at once using batched function
+            propagated_psi_list = propagate_wave_batch_with_potentials(
+                psi_list, 
+                potential_list
+            )
+            
+            # Update each electron's wavefunction with the propagated result
+            for i, electron in enumerate(self.electrons):
+                electron.wavefunction = propagated_psi_list[i]
+                electron.wavefunction = limit_frame(electron.wavefunction)
         
         # Update nuclear positions if enabled
         if self.enable_nuclear_motion:

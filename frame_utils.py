@@ -4,15 +4,27 @@ from config import SIZE, X, Y, center_x, center_y
 
 def normalize_wavefunction(psi):
     """Normalize psi so that sum(|psi|^2)==1 - torch version"""
+    # Handle both numpy arrays and torch tensors
+    was_numpy = isinstance(psi, np.ndarray)
+    
     # Ensure data is a torch tensor
     if not isinstance(psi, torch.Tensor):
         psi = torch.tensor(psi, dtype=torch.complex64)
     
     norm = torch.sqrt(torch.sum(torch.abs(psi)**2))
-    return psi / norm if norm > 0 else psi
+    result = psi / norm if norm > 0 else psi
+    
+    # Convert back to numpy if input was numpy
+    if was_numpy:
+        result = result.cpu().numpy()
+    
+    return result
 
 def apply_low_pass_filter(psi, cutoff, device=None):
     """Torch-optimized low-pass filter with cached frequency grids"""
+    # Handle both numpy arrays and torch tensors
+    was_numpy = isinstance(psi, np.ndarray)
+    
     # Ensure data is a torch tensor
     if not isinstance(psi, torch.Tensor):
         psi = torch.tensor(psi, dtype=torch.complex64)
@@ -21,7 +33,7 @@ def apply_low_pass_filter(psi, cutoff, device=None):
         device = psi.device
     psi = psi.to(device)
     
-    shape = psi.shape
+    shape = psi.shape[-2:]  # Get last 2 dimensions for 2D FFT
 
     # Pre-compute and cache frequency grid on the correct device
     kx = torch.fft.fftfreq(shape[1], device=device) * (2 * torch.pi)
@@ -31,12 +43,21 @@ def apply_low_pass_filter(psi, cutoff, device=None):
 
     
     # Apply filter using torch FFT
-    psi_hat = torch.fft.fft2(psi)
+    psi_hat = torch.fft.fft2(psi, dim=(-2, -1))  # FFT over last 2 dimensions
     mask = k_squared <= cutoff**2
-    return torch.fft.ifft2(psi_hat * mask)
+    result = torch.fft.ifft2(psi_hat * mask, dim=(-2, -1))
+    
+    # Convert back to numpy if input was numpy
+    if was_numpy:
+        result = result.cpu().numpy()
+    
+    return result
 
 def apply_absorbing_edge(psi, strength=1):
     """Apply absorbing edge boundary - torch version"""
+    # Handle both numpy arrays and torch tensors
+    was_numpy = isinstance(psi, np.ndarray)
+    
     # Ensure data is a torch tensor
     if not isinstance(psi, torch.Tensor):
         psi = torch.tensor(psi, dtype=torch.complex64)
@@ -54,18 +75,40 @@ def apply_absorbing_edge(psi, strength=1):
     absorption_start = max_radius * 0.7
     absorption_end = max_radius * 0.96  # Ensure total absorption before frame edge
     
-    mask = torch.ones(psi.shape, dtype=torch.float32, device=device)
+    # Create mask with the same shape as psi
+    mask = torch.ones_like(psi, dtype=torch.float32, device=device)
     
-    # Only apply absorption in outer region
-    outer_region = r > absorption_start
-    if torch.any(outer_region):
-        # Smooth exponential absorption that ramps up toward edges
-        absorption_depth = (r[outer_region] - absorption_start) / (absorption_end - absorption_start)
-        absorption_depth = torch.clamp(absorption_depth, 0, 1)
-        # Exponential curve for strong absorption near edges
-        mask[outer_region] = torch.exp(-strength * absorption_depth**3)
+    # Handle different tensor shapes (2D vs 3D with batch dimension)
+    if len(psi.shape) == 2:
+        # Standard 2D wavefunction
+        outer_region = r > absorption_start
+        if torch.any(outer_region):
+            absorption_depth = (r[outer_region] - absorption_start) / (absorption_end - absorption_start)
+            absorption_depth = torch.clamp(absorption_depth, 0, 1)
+            mask[outer_region] = torch.exp(-strength * absorption_depth**3)
+    else:
+        # Handle higher dimensional tensors (e.g., batched)
+        # Broadcast the outer_region mask to match psi dimensions
+        outer_region = r > absorption_start
+        if torch.any(outer_region):
+            absorption_depth = (r[outer_region] - absorption_start) / (absorption_end - absorption_start)
+            absorption_depth = torch.clamp(absorption_depth, 0, 1)
+            absorption_values = torch.exp(-strength * absorption_depth**3)
+            
+            # Apply mask across all dimensions
+            for batch_idx in range(psi.shape[0]) if len(psi.shape) > 2 else [0]:
+                if len(psi.shape) > 2:
+                    mask[batch_idx][outer_region] = absorption_values
+                else:
+                    mask[outer_region] = absorption_values
     
-    return psi * mask
+    result = psi * mask
+    
+    # Convert back to numpy if input was numpy
+    if was_numpy:
+        result = result.cpu().numpy()
+    
+    return result
 
 
 smoothing_factor = 200000

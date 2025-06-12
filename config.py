@@ -6,12 +6,16 @@ SIZE = 512
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
 TIME_STEPS = 3000
-TIME_DELTA = 8  # Reduced DT for richer time evolution
+TIME_DELTA = 4  # Reduced DT for richer time evolution
 POTENTIAL_STRENGTH = 0.6 # Coulomb strength * 10 to confine electrons
 MAX_GATES_PER_CELL = 10  # Quantum gates per cell
 
+# Performance optimization parameters
+USE_BATCHED_PROPAGATION = True  # Always use batched electron propagation
+ENABLE_VECTORIZED_REPULSION = True  # Use vectorized electron-electron repulsion calculation
+
 # Zoom out configuration
-ZOOM = 8.0
+ZOOM = 10.0
 BASE_SCALE = 400.0
 SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
 

@@ -55,7 +55,7 @@ def apply_wavefunction_dynamics(psi, x, y, cx, cy, momentum_x=0.05, momentum_y=0
     return psi.astype(np.complex128)
 
 
-def create_atom_electron(x, y, cx, cy, quantum_numbers, **kwargs):
+def create_atom_electron(x, y, cx, cy, quantum_numbers, atomic_number=1, alpha=None, scale=config.SCALE):
     """Create atomic orbital wavefunctions for any element using quantum mechanical principles.
     
     This is a generic atomic orbital generator that works for:
@@ -93,8 +93,6 @@ def create_atom_electron(x, y, cx, cy, quantum_numbers, **kwargs):
         psi = apply_wavefunction_dynamics(psi, X, Y, cx, cy, momentum_x=0.1, orbital_offset_x=2)
     """
     n, l, m = quantum_numbers
-    atomic_number = kwargs.get('atomic_number', 1)
-    alpha = kwargs.get('alpha', None)
     
     # Calculate screening parameter (alpha) using a simple universal formula
     if alpha is None:
@@ -132,7 +130,7 @@ def create_atom_electron(x, y, cx, cy, quantum_numbers, **kwargs):
     # Calculate physics-based Bohr radius
     # The stable orbital size is determined by the balance of kinetic and potential energy
     # In our simulation units: a₀ ≈ 1/√(POTENTIAL_STRENGTH * Z_eff)
-    bohr_radius = config.SCALE / np.sqrt(POTENTIAL_STRENGTH * z_eff)
+    bohr_radius = scale / np.sqrt(POTENTIAL_STRENGTH * z_eff)
     
     # Orbital size scales with n² for all atoms (using effective nuclear charge)
     orbital_radius = bohr_radius * n**2

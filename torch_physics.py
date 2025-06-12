@@ -97,6 +97,18 @@ class LaplacianWaveModel(nn.Module):
         # For kinetic energy operator: T = -ℏ²/(2m) * ∇²
         # We'll use h=1 and ℏ²/(2m) = 0.5 for simplicity
         self.kinetic_factor = 0.5
+
+    def forward(self, psi, potential):
+        """Single instance propagation using finite differences."""
+        # Unsqueeze to create a batch of 1
+        psi_batch = psi.unsqueeze(0)
+        potential_batch = potential.unsqueeze(0)
+        
+        # Propagate using the batch method
+        result_batch = self.forward_batch(psi_batch, potential_batch)
+        
+        # Squeeze to remove the batch dimension
+        return result_batch.squeeze(0)
         
     def forward_batch(self, psi_batch, potential_batch):
         """
@@ -136,16 +148,33 @@ class LaplacianWaveModel(nn.Module):
         
         return psi_batch
 
-_wave_model = None  # Global variable to hold the wave model instance
-# Update the model selection
-def get_wave_model(shape, dt=TIME_DELTA, device=DEVICE):
-    """Get or create the wave propagation model."""
-    global _wave_model
-    if _wave_model is None or _wave_model.shape != shape or device != _wave_model.laplacian_kernel.device or dt != _wave_model.dt:
-        _wave_model = LaplacianWaveModel(shape, dt, device)  # Use Laplacian model
-    return _wave_model
+_wave_models = {"fft": None, "laplacian": None}  # Global variable to hold wave model instances
 
-def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA, device=DEVICE):
+# Update the model selection
+def get_wave_model(shape, propagation_method: str, dt=TIME_DELTA, device=DEVICE):
+    """Get or create the wave propagation model based on the chosen method."""
+    global _wave_models
+    
+    model = _wave_models.get(propagation_method)
+    
+    if propagation_method == "fft":
+        if model is None or model.shape != shape or \
+           not hasattr(model, 'kinetic_phase') or \
+           device != model.kinetic_phase.device or model.dt != dt:
+            model = WavePropagationModel(shape, dt, device)
+            _wave_models["fft"] = model
+    elif propagation_method == "laplacian":
+        if model is None or model.shape != shape or \
+           not hasattr(model, 'laplacian_kernel') or \
+           device != model.laplacian_kernel.device or model.dt != dt:
+            model = LaplacianWaveModel(shape, dt, device)
+            _wave_models["laplacian"] = model
+    else:
+        raise ValueError(f"Unknown propagation_method: {propagation_method}. Choose 'fft' or 'laplacian'.")
+        
+    return model
+
+def propagate_wave_with_potential(psi, potential, propagation_method="fft", dt=TIME_DELTA, device=DEVICE):
     """
     PyTorch model-based wave propagation using split-step Fourier method.
     Much faster due to pre-computed tensors and optimized computation graph.
@@ -158,7 +187,7 @@ def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA, device=DEVICE):
 
     psi = convert_to_device(psi, device)
     potential = convert_to_device(potential, device)
-    model = get_wave_model(psi.shape, dt, device)
+    model = get_wave_model(psi.shape, propagation_method, dt, device)
     # Convert to torch tensors
     
     # Propagate
@@ -168,7 +197,7 @@ def propagate_wave_with_potential(psi, potential, dt=TIME_DELTA, device=DEVICE):
         return result.cpu().numpy()  
     return result
 
-def propagate_wave_batch_with_potentials(psi_list, potential_list, dt=TIME_DELTA, device=DEVICE):
+def propagate_wave_batch_with_potentials(psi_list, potential_list, propagation_method="fft", dt=TIME_DELTA, device=DEVICE):
     """
     Batched wave propagation for multiple electrons simultaneously.
     This is much faster than calling propagate_wave_with_potential in a loop.
@@ -203,7 +232,8 @@ def propagate_wave_batch_with_potentials(psi_list, potential_list, dt=TIME_DELTA
     potential_batch = torch.stack(potential_tensors, dim=0)
     
     # Get model and propagate batch
-    model = get_wave_model(psi_batch.shape[1:], dt, device)  # Shape without batch dim
+    # Shape for the model is the shape of individual wavefunctions, not the batch shape
+    model = get_wave_model(psi_batch.shape[1:], propagation_method, dt, device)
     result_batch = model.forward_batch(psi_batch, potential_batch)
     
     # Convert back to list

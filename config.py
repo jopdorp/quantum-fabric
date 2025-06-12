@@ -6,7 +6,8 @@ SIZE = 512
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
 TIME_STEPS = 3000
-TIME_DELTA = 4  # Reduced DT for richer time evolution
+TIME_DELTA = 4
+  # Reduced DT for richer time evolution
 POTENTIAL_STRENGTH = 0.6 # Coulomb strength * 10 to confine electrons
 MAX_GATES_PER_CELL = 10  # Quantum gates per cell
 

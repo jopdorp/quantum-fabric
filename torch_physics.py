@@ -148,8 +148,6 @@ class LaplacianWaveModel(nn.Module):
         
         return psi_batch
 
-_wave_models = {"fft": None, "laplacian": None}  # Global variable to hold wave model instances
-
 # Update the model selection
 def get_wave_model(shape, propagation_method: str, dt=TIME_DELTA, device=DEVICE):
     """Get or create the wave propagation model based on the chosen method."""
@@ -163,14 +161,25 @@ def get_wave_model(shape, propagation_method: str, dt=TIME_DELTA, device=DEVICE)
            device != model.kinetic_phase.device or model.dt != dt:
             model = WavePropagationModel(shape, dt, device)
             _wave_models["fft"] = model
+    elif propagation_method == "fft_heavy_damping":
+        if model is None or model.shape != shape or model.dt != dt:
+            model = DetailPreservingFFTModel(shape, dt, device, mode="adaptive_precision")
+            _wave_models["fft_heavy_damping"] = model
+    elif propagation_method == "fft_medium_damping":
+        if model is None or model.shape != shape or model.dt != dt:
+            model = DetailPreservingFFTModel(shape, dt, device, mode="detail_preserving")
+            _wave_models["fft_medium_damping"] = model
+    elif propagation_method == "fft_light_damping":
+        if model is None or model.shape != shape or model.dt != dt:
+            model = DetailPreservingFFTModel(shape, dt, device, mode="selective_damping")
+            _wave_models["fft_light_damping"] = model
     elif propagation_method == "laplacian":
-        if model is None or model.shape != shape or \
-           not hasattr(model, 'laplacian_kernel') or \
-           device != model.laplacian_kernel.device or model.dt != dt:
+        if model is None or model.shape != shape or model.dt != dt:
             model = LaplacianWaveModel(shape, dt, device)
             _wave_models["laplacian"] = model
     else:
-        raise ValueError(f"Unknown propagation_method: {propagation_method}. Choose 'fft' or 'laplacian'.")
+        available = ["fft", "fft_heavy_damping", "fft_medium_damping", "fft_light_damping", "laplacian"]
+        raise ValueError(f"Unknown propagation_method: {propagation_method}. Choose from {available}")
         
     return model
 
@@ -245,3 +254,131 @@ def propagate_wave_batch_with_potentials(psi_list, potential_list, propagation_m
         result_list.append(result)
     
     return result_list
+
+# Monitoring function for debugging
+
+def check_wavefunction_health(psi, step=0, name="wavefunction"):
+    """Monitor wavefunction for numerical issues"""
+    norm = torch.sqrt(torch.sum(torch.abs(psi)**2))
+    max_val = torch.max(torch.abs(psi))
+    min_val = torch.min(torch.abs(psi))
+    
+    # Check for problematic conditions
+    issues = []
+    if norm == 0:
+        issues.append("zero norm")
+    elif norm > 10.0:
+        issues.append(f"large norm ({norm:.3f})")
+    elif norm < 0.1:
+        issues.append(f"small norm ({norm:.3f})")
+    
+    if max_val > 100.0:
+        issues.append(f"large amplitude ({max_val:.3f})")
+    
+    if torch.isnan(psi).any():
+        issues.append("NaN values")
+    
+    if torch.isinf(psi).any():
+        issues.append("infinite values")
+    
+    if issues and step % 100 == 0:  # Report occasionally to avoid spam
+        print(f"WARNING: {name} at step {step} has issues: {', '.join(issues)}")
+    
+    return len(issues) == 0
+
+class DetailPreservingFFTModel(nn.Module):
+    """
+    Enhanced FFT model that preserves maximum detail while ensuring stability.
+    Uses selective filtering instead of blunt stabilization.
+    """
+    
+    def __init__(self, shape, dt=TIME_DELTA, device=DEVICE, mode="detail_preserving"):
+        super().__init__()
+        self.shape = shape
+        self.dt = dt
+        self.mode = mode
+        
+        # Pre-compute k-space coordinates
+        kx = torch.fft.fftfreq(shape[1], d=1.0, device=device) * (2 * torch.pi)
+        ky = torch.fft.fftfreq(shape[0], d=1.0, device=device) * (2 * torch.pi)
+        KY, KX = torch.meshgrid(ky, kx, indexing='ij')
+        k_squared = KX**2 + KY**2
+        
+        # For detail preservation, we rely on selective filtering instead of substeps
+        # This preserves the speed benefit of larger time steps
+        self.n_substeps = 1  # No substeps - use filtering for stability
+        self.effective_dt = dt
+        
+        # Create selective stabilization filters
+        k_magnitude = torch.sqrt(k_squared)
+        k_nyquist = torch.pi
+        
+        if mode == "detail_preserving":
+            # Only filter the most unstable high frequencies (top 2%) - more aggressive preservation
+            k_cutoff = k_nyquist * 0.98
+            stability_filter = torch.where(
+                k_magnitude <= k_cutoff,
+                torch.ones_like(k_magnitude),
+                torch.exp(-((k_magnitude - k_cutoff) / (0.01 * k_nyquist))**6)  # Sharp cutoff for detail preservation
+            )
+        elif mode == "selective_damping":
+            # Apply very mild damping to high frequencies while preserving detail
+            # Focus only on preventing the most extreme instabilities
+            k_critical = k_nyquist * 0.85  # Keep 85% of frequencies untouched
+            damping_strength = k_squared * self.effective_dt / (torch.pi * 0.5)
+            stability_filter = torch.where(
+                k_magnitude <= k_critical,
+                torch.ones_like(k_magnitude),  # No damping for most frequencies
+                torch.exp(-0.05 * torch.maximum(torch.tensor(0.0, device=device), damping_strength - 1.0))  # Very mild damping
+            )
+        elif mode == "adaptive_precision":
+            # Use higher precision for critical frequencies
+            # This preserves important physics while stabilizing
+            physics_relevant_k = k_nyquist * 0.3  # Keep low-mid frequencies intact
+            stability_filter = torch.where(
+                k_magnitude <= physics_relevant_k,
+                torch.ones_like(k_magnitude),  # Perfect preservation
+                torch.exp(-((k_magnitude - physics_relevant_k) / (0.3 * k_nyquist))**4)
+            )
+        
+        kinetic_phase = torch.exp(-1j * self.effective_dt * k_squared * 0.5)
+        self.register_buffer('kinetic_phase', kinetic_phase)
+        self.register_buffer('stability_filter', stability_filter)
+        
+        # Calculate preserved frequency range
+        preserved_fraction = torch.sum(stability_filter > 0.99) / torch.numel(stability_filter)
+        print(f"Detail-Preserving FFT Model ({mode}):")
+        print(f"  Single step dt: {self.effective_dt:.6f} (no substeps)")
+        print(f"  Frequency preservation: {preserved_fraction:.1%}")
+        print(f"  Detail loss: Minimal (only top {100*(1-preserved_fraction):.1f}% frequencies)")
+        
+    def forward(self, psi, potential):
+        """Single instance propagation."""
+        return self.forward_batch(psi.unsqueeze(0), potential.unsqueeze(0)).squeeze(0)
+        
+    def forward_batch(self, psi_batch, potential_batch):
+        """Enhanced FFT with minimal detail loss - single step with selective filtering"""
+        potential_phase = torch.exp(-1j * self.effective_dt * potential_batch * 0.5)
+        
+        # Split-step: V/2 -> T -> V/2
+        psi_batch = psi_batch * potential_phase
+        psi_hat_batch = torch.fft.fft2(psi_batch, dim=(-2, -1))
+        
+        # Apply selective stabilization (preserves most detail)
+        psi_hat_batch = psi_hat_batch * self.stability_filter.unsqueeze(0)
+        
+        # Kinetic evolution
+        psi_hat_batch = psi_hat_batch * self.kinetic_phase.unsqueeze(0)
+        psi_batch = torch.fft.ifft2(psi_hat_batch, dim=(-2, -1))
+        psi_batch = psi_batch * potential_phase
+        
+        return psi_batch
+
+# Extend global wave models dictionary
+_wave_models = {
+    "fft": None, 
+    "fft_heavy_damping": None,
+    "fft_medium_damping": None,
+    "fft_light_damping": None,
+    "laplacian": None
+}  # Global variable to hold wave model instances

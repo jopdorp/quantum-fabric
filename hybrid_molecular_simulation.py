@@ -472,7 +472,7 @@ class HybridMolecularSimulation:
         # Convert torch tensors to numpy for the physics engine
         
         # Use batched wave propagation for efficiency
-        evolved_psi_list = propagate_wave_batch_with_potentials(psi_list, potentials)
+        evolved_psi_list = propagate_wave_batch_with_potentials(psi_list, potentials, propagation_method="fft_medium_damping")
         
         # Update electron wavefunctions
         for i, electron in enumerate(self.electrons):

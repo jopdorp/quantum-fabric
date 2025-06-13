@@ -2,7 +2,7 @@ import numpy as np
 
 
 # Grid and simulation parameters
-SIZE = 512
+SIZE = 1024
 GRID_WIDTH = SIZE
 GRID_HEIGHT = SIZE
 TIME_STEPS = 3000

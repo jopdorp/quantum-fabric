@@ -22,7 +22,7 @@ from hybrid_molecular_simulation import (
     HybridMolecularSimulation, MolecularElectron, MolecularNucleus, 
     create_atom_electron, gaussian_filter_torch, X, Y
 )
-from config import SIZE, TIME_STEPS, SCALE, center_x, center_y
+from config import TIME_STEPS, SCALE, center_x, center_y
 from video_utils import StreamingVideoWriter, open_video
 
 class ElectronInfo:
@@ -398,7 +398,7 @@ def run_simulation(simulation: UnifiedHybridMolecularSimulation,
 def create_unified_hydrogen_molecule_simulation() -> UnifiedHybridMolecularSimulation:
     """Create a unified H2 molecule simulation with combined wavefunction that preserves atomic character."""
     # Molecular parameters - closer spacing to see interaction
-    bond_length = 1.2 * SCALE  # Closer for better interaction
+    bond_length = 1.6 * SCALE  # Closer for better interaction
     nucleus1_x = center_x - bond_length/2
     nucleus2_x = center_x + bond_length/2
     nucleus_y = center_y

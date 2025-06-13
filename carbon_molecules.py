@@ -6,29 +6,8 @@ This module provides configuration functions for creating various carbon structu
 - Carbon dimers (C2 molecules)
 - Diamond unit cells
 - Carbon chains (carbyne)
-- Crystal lattices from dimers
-
-For running diamond crystal structure simulations, use    if choice == "2":
-        # Diamond unit cell simulation
-        carbon_configs = create_diamond_unit_cell()
-        run_carbon_structure_simulation(
-            carbon_configs,
-            "Diamond Unit Cell",
-            "diamond_unit_cell.avi",
-            1500,
-            extra_info="Four carbon atoms in tetrahedral arrangement"
-        )
-    elif choice == "3":
-        # Carbon chain simulation
-        carbon_configs = create_carbon_chain()
-        run_carbon_structure_simulation(
-            carbon_configs,
-            "Carbon Chain (Carbyne)",
-            "carbon_chain.avi",
-            1800,
-            extra_info="Linear chain of 3 carbon atoms"
-        )ulation.py
-which imports the configuration functions from this module.
+- Tetrahedral carbon clusters
+- Graphene-like hexagonal rings
 """
 
 from unified_hybrid_molecular_simulation import (
@@ -299,10 +278,14 @@ if __name__ == "__main__":
     print("Choose basic simulation type:")
     print("1. Carbon dimer (C2)")
     print("2. Tetrahedral carbon cluster (4 atoms)")  
-    print("3. Carbon chain")
-    print("4. All basic simulations")
+    print("3. Carbon chain (carbyne)")
+    print("4. Tetrahedral carbon cluster (5 atoms)")
+    print("5. Graphene hexagonal ring (6 atoms)")
+    print("6. Diamond crystal 2x2x2 (8 atoms)")
+    print("7. C2 molecular crystal lattice")
+    print("8. All basic simulations (1-3)")
     
-    choice = input("\nEnter choice (1-4) or press Enter for C2: ").strip()
+    choice = input("\nEnter choice (1-8) or press Enter for C2: ").strip()
     
     if choice == "2":
         # Tetrahedral carbon cluster simulation
@@ -323,4 +306,88 @@ if __name__ == "__main__":
             "carbon_chain.avi",
             1800,
             extra_info="Linear chain of 3 carbon atoms"
+        )
+    elif choice == "4":
+        # 5-atom tetrahedral carbon cluster simulation
+        carbon_configs = create_tetrahedral_carbon_cluster_5atom()
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Tetrahedral Carbon Cluster (5 atoms)",
+            "tetrahedral_cluster_5atom.avi",
+            1500,
+            extra_info="Five carbon atoms: 1 central + 4 neighbors (NOT true diamond unit)"
+        )
+    elif choice == "5":
+        # Graphene hexagonal ring simulation
+        carbon_configs = create_graphene_hexagonal_ring_config()
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Graphene Hexagonal Ring",
+            "graphene_hexagonal_ring.avi",
+            1200,
+            extra_info="Six carbon atoms in hexagonal ring (graphene-like structure)"
+        )
+    elif choice == "6":
+        # Diamond crystal 2x2x2 simulation
+        carbon_configs = create_diamond_crystal_2x2x2_config()
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Diamond Crystal 2x2x2",
+            "diamond_crystal_2x2x2.avi",
+            2000,
+            extra_info="Eight carbon atoms in diamond crystal structure (3D projected to 2D)"
+        )
+    elif choice == "7":
+        # C2 molecular crystal lattice simulation
+        carbon_configs = create_c2_molecular_crystal_config()
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "C2 Molecular Crystal Lattice",
+            "c2_molecular_crystal.avi",
+            1800,
+            extra_info="3x3 lattice of C2 dimer molecules (18 carbon atoms total)"
+        )
+    elif choice == "8":
+        print("Running all basic carbon simulations...\n")
+        
+        # C2 dimer
+        carbon_configs = create_carbon_dimer((center_x, center_y))
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Carbon Dimer (C2)",
+            "carbon_dimer_bonding.avi",
+            2000,
+            extra_info="Two carbon atoms forming molecular orbital"
+        )
+        print("\n" + "="*50 + "\n")
+        
+        # Tetrahedral carbon cluster
+        carbon_configs = create_tetrahedral_carbon_cluster_4atom()
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Tetrahedral Carbon Cluster",
+            "tetrahedral_cluster.avi",
+            1500,
+            extra_info="Four carbon atoms in tetrahedral arrangement (NOT true diamond unit cell)"
+        )
+        print("\n" + "="*50 + "\n")
+        
+        # Carbon chain
+        carbon_configs = create_carbyne_chain()
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Carbon Chain (Carbyne)",
+            "carbon_chain.avi",
+            1800,
+            extra_info="Linear chain of 3 carbon atoms"
+        )
+    else:
+        # Default: C2 dimer
+        carbon_configs = create_carbon_dimer((center_x, center_y))
+        run_carbon_structure_simulation(
+            carbon_configs,
+            "Carbon Dimer (C2)",
+            "carbon_dimer_bonding.avi",
+            2000,
+            extra_info="Two carbon atoms forming molecular orbital"
         )

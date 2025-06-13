@@ -16,12 +16,6 @@ This approach combines the best of both worlds:
     print("Creating electron 2 (moving toward center)...")
     psi2 = create_atom_electron(X, Y, nucleus2_x, nucleus_y, (1, 0, 0),
                                atomic_number=1, alpha=0.11)  # alpha=0.11 makes atoms ~3x bigger-electron interactions
-
-Key differences from unified_wave_prototype.py:
-- Each electron maintains its own wavefunction and identity
-- Electrons interact through computed potential fields (not direct superposition)
-- Uses batched FFT evolution for efficiency while preserving individual dynamics
-- More physically accurate representation of molecular bonding
 """
 
 import torch
@@ -441,7 +435,7 @@ class HybridMolecularSimulation:
         
         # Define circular boundary parameters
         max_radius = min(center_x_pos, center_y_pos) * 0.9  # Leave some margin from actual edges
-        absorption_width = 60  # Width of absorption region
+        absorption_width = 20  # Width of absorption region
         absorption_start = max_radius - absorption_width
         
         # Create circular absorbing mask
@@ -458,8 +452,23 @@ class HybridMolecularSimulation:
         normalized_depth = torch.clamp(absorption_region / absorption_width, 0, 1)
         mask = torch.exp(-absorption_strength * normalized_depth ** 3)
         
-        # Apply absorption
-        return wavefunction * mask
+        # Add quantum noise near boundaries for realism
+        # Noise strength increases near boundaries (where quantum uncertainty is highest)
+        noise_strength = 0.0002 * normalized_depth  # Stronger noise near boundary
+        
+        # Generate complex quantum noise (both amplitude and phase fluctuations)
+        noise_real = torch.randn_like(wavefunction.real) * noise_strength
+        noise_imag = torch.randn_like(wavefunction.imag) * noise_strength
+        quantum_noise = torch.complex(noise_real, noise_imag)
+        
+        # Apply absorption with noise
+        absorbed_wf = wavefunction * mask
+        
+        # Add noise only in boundary regions
+        noise_mask = (normalized_depth > 0.1).float()  # Only add noise where there's some absorption
+        noisy_wf = absorbed_wf + quantum_noise * noise_mask
+        
+        return noisy_wf
 
     def evolve_step(self, step: int):
         """Evolve all electrons and nuclei by one time step."""
@@ -473,7 +482,7 @@ class HybridMolecularSimulation:
         # Convert torch tensors to numpy for the physics engine
         
         # Use batched wave propagation for efficiency
-        evolved_psi_list = propagate_wave_batch_with_potentials(psi_list, potentials, propagation_method="fft_heavy_damping")
+        evolved_psi_list = propagate_wave_batch_with_potentials(psi_list, potentials, propagation_method="fft_medium_damping")
         
         # Update electron wavefunctions
         for i, electron in enumerate(self.electrons):

@@ -404,10 +404,10 @@ class HybridMolecularSimulation:
                 # Electrons from same atom: attractive
                 # Electrons from other atoms: can create bonding or anti-bonding forces
                 if electron.atom_id == nucleus.atom_id:
-                    forces[i] += force  # Own electrons are attractive
+                    forces[i] += force * 10.0  # Much stronger attraction from own electrons
                 else:
                     # Inter-atomic electron forces create molecular bonding
-                    forces[i] += force * 0.4  # Weaker but significant bonding force
+                    forces[i] += force * 4.0  # Stronger bonding force
         
         # Nuclear-nuclear repulsion
         for i, nucleus1 in enumerate(self.nuclei):
@@ -419,7 +419,7 @@ class HybridMolecularSimulation:
                     r = torch.maximum(r, torch.tensor(2.0))  # Prevent singularity
                     
                     # Coulomb repulsion F = k*q1*q2/r^2
-                    force_magnitude = 8.0 * nucleus1.atomic_number * nucleus2.atomic_number / (r**2)
+                    force_magnitude = 2.0 * nucleus1.atomic_number * nucleus2.atomic_number / (r**2)  # Much weaker repulsion
                     
                     # Direction away from other nucleus
                     force_x = -force_magnitude * dx / r
@@ -472,7 +472,7 @@ class HybridMolecularSimulation:
         # Convert torch tensors to numpy for the physics engine
         
         # Use batched wave propagation for efficiency
-        evolved_psi_list = propagate_wave_batch_with_potentials(psi_list, potentials, propagation_method="fft_medium_damping")
+        evolved_psi_list = propagate_wave_batch_with_potentials(psi_list, potentials, propagation_method="fft_heavy_damping")
         
         # Update electron wavefunctions
         for i, electron in enumerate(self.electrons):
@@ -531,7 +531,7 @@ class HybridMolecularSimulation:
 def create_hydrogen_molecule_simulation() -> HybridMolecularSimulation:
     """Create a realistic H2 molecule simulation."""
     # Molecular parameters
-    bond_length = 2 * SCALE  # Increased H-H bond length for better visualization
+    bond_length = 1.2 * SCALE  # Increased H-H bond length for better visualization
     nucleus1_x = center_x - bond_length/2
     nucleus2_x = center_x + bond_length/2
     nucleus_y = center_y
@@ -544,11 +544,11 @@ def create_hydrogen_molecule_simulation() -> HybridMolecularSimulation:
     
     # Create electrons with realistic hydrogen 1s orbitals (3x bigger for better visualization)
     print("Creating electron 1 (atom 0)...")
-    psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus_y, (2, 1, 0), 
+    psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus_y, (1, 0, 0), 
                                atomic_number=1, scale=SCALE /10)
     
     print("Creating electron 2 (atom 1)...")
-    psi2 = create_atom_electron(X, Y, nucleus2_x, nucleus_y, (3, 2, 1), 
+    psi2 = create_atom_electron(X, Y, nucleus2_x, nucleus_y, (1, 0, 0), 
                                atomic_number=1, scale=SCALE /10)
     
     electrons = [

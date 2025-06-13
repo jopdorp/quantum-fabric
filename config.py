@@ -16,7 +16,7 @@ USE_BATCHED_PROPAGATION = True  # Always use batched electron propagation
 ENABLE_VECTORIZED_REPULSION = True  # Use vectorized electron-electron repulsion calculation
 
 # Zoom out configuration
-ZOOM = 20.0
+ZOOM = 10.0
 BASE_SCALE = 400.0
 SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
 

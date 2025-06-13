@@ -288,34 +288,37 @@ class UnifiedQuantumField:
         self.system_wavefunction = torch.fft.ifft2(psi_k)
     
     def _apply_absorbing_boundaries(self):
-        """Apply absorbing boundary conditions to prevent reflection"""
+        """Apply circular absorbing boundary conditions to prevent reflection"""
         if self.system_wavefunction is None:
             return
             
-        # Create absorbing mask - exponential decay near boundaries
+        # Create circular absorbing mask
         x_grid = torch.arange(self.shape[1], dtype=torch.float32, device=self.device)
         y_grid = torch.arange(self.shape[0], dtype=torch.float32, device=self.device)
         Y_grid, X_grid = torch.meshgrid(y_grid, x_grid, indexing='ij')
         
-        # Distance from edges
-        edge_width = 50  # Wider absorbing region 
-        x_dist_left = X_grid
-        x_dist_right = self.shape[1] - 1 - X_grid
-        y_dist_top = Y_grid  
-        y_dist_bottom = self.shape[0] - 1 - Y_grid
+        # Calculate distance from center of simulation domain
+        center_x_pos = self.shape[1] / 2.0
+        center_y_pos = self.shape[0] / 2.0
+        r = torch.sqrt((X_grid - center_x_pos)**2 + (Y_grid - center_y_pos)**2)
         
-        # Minimum distance to any edge
-        edge_dist = torch.minimum(
-            torch.minimum(x_dist_left, x_dist_right),
-            torch.minimum(y_dist_top, y_dist_bottom)
+        # Define circular boundary parameters
+        max_radius = min(center_x_pos, center_y_pos) * 0.85  # Conservative radius
+        absorption_width = 50  # Width of absorption region
+        absorption_start = max_radius - absorption_width
+        
+        # Create circular absorbing mask
+        absorption_strength = 0.08  # Moderate absorption for unified wave
+        
+        # Only apply absorption outside the absorption start radius
+        absorption_region = torch.maximum(
+            torch.tensor(0.0, device=self.device), 
+            r - absorption_start
         )
         
-        # Create absorbing mask (1.0 in center, decays more strongly at edges)
-        absorption_strength = 0.05  # Stronger absorption to reduce reflections
-        mask = torch.exp(-absorption_strength * torch.maximum(
-            torch.tensor(0.0, device=self.device), 
-            edge_width - edge_dist
-        ) / edge_width)
+        # Use cubic falloff for smooth circular absorption
+        normalized_depth = torch.clamp(absorption_region / absorption_width, 0, 1)
+        mask = torch.exp(-absorption_strength * normalized_depth ** 3)
         
         # Apply absorption
         self.system_wavefunction = self.system_wavefunction * mask

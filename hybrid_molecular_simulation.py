@@ -431,31 +431,32 @@ class HybridMolecularSimulation:
         return forces
     
     def apply_absorbing_boundaries(self, wavefunction: torch.Tensor) -> torch.Tensor:
-        # Create absorbing mask - exponential decay near boundaries
+        # Create circular absorbing mask - exponential decay near circular boundary
         # Use global X, Y tensors for grid coordinates
         
-        # Distance from edges
-        edge_width = 80  # Wider absorbing region for stronger effect
-        x_dist_left = X
-        x_dist_right = SIZE - 1 - X
-        y_dist_top = Y  
-        y_dist_bottom = SIZE - 1 - Y
+        # Calculate distance from center of simulation domain
+        center_x_pos = SIZE / 2.0
+        center_y_pos = SIZE / 2.0
+        r = torch.sqrt((X - center_x_pos)**2 + (Y - center_y_pos)**2)
         
-        # Minimum distance to any edge
-        edge_dist = torch.minimum(
-            torch.minimum(x_dist_left, x_dist_right),
-            torch.minimum(y_dist_top, y_dist_bottom)
-        )
+        # Define circular boundary parameters
+        max_radius = min(center_x_pos, center_y_pos) * 0.9  # Leave some margin from actual edges
+        absorption_width = 60  # Width of absorption region
+        absorption_start = max_radius - absorption_width
         
-        # Create absorbing mask (1.0 in center, decays more strongly at edges)
-        absorption_strength = 1  # Much stronger absorption to eliminate reflections
+        # Create circular absorbing mask
+        absorption_strength = 1.2  # Stronger absorption for circular boundaries
+        
+        # Only apply absorption outside the absorption start radius
         absorption_region = torch.maximum(
             torch.tensor(0.0, device=wavefunction.device), 
-            edge_width - edge_dist
+            r - absorption_start
         )
         
-        # Use quadratic falloff for stronger absorption near edges
-        mask = torch.exp(-absorption_strength * (absorption_region / edge_width) ** 2)
+        # Use cubic falloff for smooth absorption with circular geometry
+        # Normalize by absorption width to get 0-1 range
+        normalized_depth = torch.clamp(absorption_region / absorption_width, 0, 1)
+        mask = torch.exp(-absorption_strength * normalized_depth ** 3)
         
         # Apply absorption
         return wavefunction * mask

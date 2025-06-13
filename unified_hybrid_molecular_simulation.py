@@ -15,7 +15,7 @@ Features:
 """
 
 import torch
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple
 
 # Import everything from the hybrid molecular simulation
 from hybrid_molecular_simulation import (

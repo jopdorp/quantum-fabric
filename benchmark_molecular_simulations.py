@@ -8,7 +8,7 @@ Benchmark script to compare performance between:
 import time
 import torch
 import numpy as np
-from typing import Dict, List
+from typing import Dict
 
 # Import both simulation approaches
 from hybrid_molecular_simulation import (

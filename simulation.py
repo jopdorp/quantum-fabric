@@ -233,7 +233,7 @@ class AtomSimulation:
             for electron in self.electrons:
                 # All electrons exert forces on all nuclei
                 density = electron.get_density()
-                force = compute_force_from_density(density, nucleus.position)
+                force = compute_force_from_density(density, nucleus.position, X, Y)
                 
                 # If electron is bound to this nucleus: attractive force (negative charge)
                 # If electron is bound to another nucleus: can be attractive (bonding) or repulsive

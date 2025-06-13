@@ -9,8 +9,6 @@ from config import (
     COULOMB_STRENGTH,
     STRONG_FORCE_STRENGTH,
     STRONG_FORCE_RANGE,
-    TIME_DELTA,
-    X,Y
 )
 
 
@@ -34,7 +32,7 @@ def add_mean_field_coulomb_repulsion(source_psi, strength=0.05, sigma=5):
     repulsion = gaussian_filter(charge_density, sigma=sigma)
     return strength * repulsion
 
-def compute_force_from_density(charge_density, nucleus_pos):
+def compute_force_from_density(charge_density, nucleus_pos, X, Y):
     """Compute forces on nucleus from electron density - supports torch tensors."""
     # Convert to numpy if it's a torch tensor
     if hasattr(charge_density, 'cpu'):  # Check if it's a torch tensor

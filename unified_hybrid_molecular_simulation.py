@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Unified Hybrid Molecular Simulation - Combined Electron Wave Field
+Generic Unified Molecular Simulation Framework
 
-This approach unifies all electron wavefunctions into a single collective field while
-using the same physics engine as hybrid_molecular_simulation.py for consistency.
+This framework provides a unified approach for molecular simulations where all electron 
+wavefunctions are combined into a single collective field. It's designed to be generic
+and easily configurable for different atoms and molecules.
 
-Key changes:
-- Import all physics implementations from hybrid_molecular_simulation.py
-- Only implement the unification logic here
-- Use the same FFT+Laplacian evolution for consistency
+Features:
+- Unified electron wavefunction approach for efficiency
+- Generic atom and molecule creation functions
+- Configurable electronic configurations
+- Support for any atomic number and electron count
+- Reusable simulation components
 """
 
 import torch
-from typing import List
+from typing import List, Tuple, Dict, Optional
 
 # Import everything from the hybrid molecular simulation
 from hybrid_molecular_simulation import (
@@ -24,9 +27,44 @@ from video_utils import StreamingVideoWriter, open_video
 
 class ElectronInfo:
     """Information about an electron in the unified wavefunction"""
-    def __init__(self, atom_id: int, electron_name: str = "electron"):
+    def __init__(self, atom_id: int, electron_name: str = "electron", 
+                 quantum_numbers: Tuple[int, int, int] = (1, 0, 0)):
         self.atom_id = atom_id  # Which atom this electron belongs to
         self.name = electron_name
+        self.quantum_numbers = quantum_numbers  # (n, l, m) quantum numbers
+
+
+class AtomConfig:
+    """Configuration for creating an atom with its electrons"""
+    def __init__(self, atomic_number: int, position: Tuple[float, float], 
+                 electron_configs: List[Tuple[int, int, int]] = None):
+        self.atomic_number = atomic_number
+        self.position = position
+        self.electron_configs = electron_configs or self._default_electron_config()
+    
+    def _default_electron_config(self) -> List[Tuple[int, int, int]]:
+        """Generate default electron configuration based on atomic number"""
+        configs = []
+        remaining_electrons = self.atomic_number
+        
+        # Fill orbitals in order: 1s, 2s, 2p, 3s, 3p, 4s, 3d, 4p, etc.
+        orbital_order = [
+            (1, 0, 0),  # 1s (2 electrons max)
+            (2, 0, 0),  # 2s (2 electrons max)
+            (2, 1, -1), (2, 1, 0), (2, 1, 1),  # 2p (6 electrons max)
+            (3, 0, 0),  # 3s (2 electrons max)
+            (3, 1, -1), (3, 1, 0), (3, 1, 1),  # 3p (6 electrons max)
+            (4, 0, 0),  # 4s (2 electrons max)
+            (3, 2, -2), (3, 2, -1), (3, 2, 0), (3, 2, 1), (3, 2, 2),  # 3d (10 electrons max)
+        ]
+        
+        for orbital in orbital_order:
+            if remaining_electrons <= 0:
+                break
+            configs.append(orbital)
+            remaining_electrons -= 1
+        
+        return configs
 
 
 class UnifiedHybridMolecularSimulation(HybridMolecularSimulation):
@@ -160,6 +198,203 @@ class UnifiedHybridMolecularSimulation(HybridMolecularSimulation):
             "molecular_ratio": (density_molecular / total_density).item()
         }
     
+def create_atom_simulation(atom_config: AtomConfig) -> UnifiedHybridMolecularSimulation:
+    """Create a unified simulation for a single atom."""
+    # Create nucleus
+    nuclei = [MolecularNucleus(atom_config.position[0], atom_config.position[1], 
+                              atomic_number=atom_config.atomic_number, atom_id=0)]
+    
+    # Create electron wavefunctions and info
+    print(f"Creating {len(atom_config.electron_configs)} electrons for {atom_config.atomic_number}-electron atom...")
+    
+    electron_wavefunctions = []
+    electron_infos = []
+    
+    for i, (n, l, m) in enumerate(atom_config.electron_configs):
+        print(f"  Creating electron {i+1}: {n}{['s','p','d','f'][l]} orbital")
+        
+        # Create wavefunction
+        psi = create_atom_electron(X, Y, atom_config.position[0], atom_config.position[1], 
+                                  (n, l, m), atomic_number=atom_config.atomic_number, 
+                                  scale=SCALE/10)
+        electron_wavefunctions.append(psi)
+        
+        # Create electron info
+        electron_infos.append(ElectronInfo(
+            atom_id=0, 
+            electron_name=f"e_{i+1}_{n}{['s','p','d','f'][l]}",
+            quantum_numbers=(n, l, m)
+        ))
+    
+    # Create unified wavefunction by superposition
+    print("Creating unified wavefunction...")
+    if len(electron_wavefunctions) == 1:
+        unified_psi = electron_wavefunctions[0]
+    else:
+        # Simple superposition with equal weights
+        unified_psi = sum(electron_wavefunctions) / torch.sqrt(torch.tensor(float(len(electron_wavefunctions))))
+    
+    # Normalize
+    norm = torch.sqrt(torch.sum(torch.abs(unified_psi)**2))
+    if norm > 0:
+        unified_psi = unified_psi / norm
+    
+    return UnifiedHybridMolecularSimulation(
+        nuclei=nuclei,
+        electron_infos=electron_infos,
+        unified_wavefunction=unified_psi,
+        electron_repulsion_strength=0.08,  # Reduced for many-electron atoms
+        nuclear_motion_enabled=False,     # Single atom doesn't need nuclear motion
+        damping_factor=0.999
+    )
+
+
+def create_molecule_simulation(atom_configs: List[AtomConfig], 
+                             bond_type: str = "bonding") -> UnifiedHybridMolecularSimulation:
+    """Create a unified simulation for a molecule with multiple atoms."""
+    
+    # Create nuclei
+    nuclei = []
+    for i, config in enumerate(atom_configs):
+        nuclei.append(MolecularNucleus(config.position[0], config.position[1],
+                                     atomic_number=config.atomic_number, atom_id=i))
+    
+    # Create all electron wavefunctions
+    all_electron_wavefunctions = []
+    all_electron_infos = []
+    
+    for atom_id, config in enumerate(atom_configs):
+        print(f"Creating {len(config.electron_configs)} electrons for atom {atom_id+1} (Z={config.atomic_number})...")
+        
+        for i, (n, l, m) in enumerate(config.electron_configs):
+            # Create wavefunction
+            psi = create_atom_electron(X, Y, config.position[0], config.position[1], 
+                                      (n, l, m), atomic_number=config.atomic_number, 
+                                      scale=SCALE/10)
+            all_electron_wavefunctions.append(psi)
+            
+            # Create electron info
+            all_electron_infos.append(ElectronInfo(
+                atom_id=atom_id, 
+                electron_name=f"atom{atom_id+1}_e{i+1}_{n}{['s','p','d','f'][l]}",
+                quantum_numbers=(n, l, m)
+            ))
+    
+    # Create unified molecular wavefunction
+    print(f"Creating unified molecular wavefunction ({bond_type})...")
+    
+    if bond_type == "bonding":
+        # Bonding: constructive interference between atomic orbitals
+        unified_psi = sum(all_electron_wavefunctions) / torch.sqrt(torch.tensor(float(len(all_electron_wavefunctions))))
+    elif bond_type == "antibonding":
+        # Antibonding: alternate signs for destructive interference
+        unified_psi = torch.zeros_like(all_electron_wavefunctions[0])
+        for i, psi in enumerate(all_electron_wavefunctions):
+            sign = (-1) ** i  # Alternating signs
+            unified_psi += sign * psi
+        unified_psi = unified_psi / torch.sqrt(torch.tensor(float(len(all_electron_wavefunctions))))
+    else:
+        # Neutral: simple superposition
+        unified_psi = sum(all_electron_wavefunctions) / torch.sqrt(torch.tensor(float(len(all_electron_wavefunctions))))
+    
+    # Normalize
+    norm = torch.sqrt(torch.sum(torch.abs(unified_psi)**2))
+    if norm > 0:
+        unified_psi = unified_psi / norm
+    
+    return UnifiedHybridMolecularSimulation(
+        nuclei=nuclei,
+        electron_infos=all_electron_infos,
+        unified_wavefunction=unified_psi,
+        electron_repulsion_strength=0.08,  # Adjusted for molecular systems
+        nuclear_motion_enabled=True,      # Enable nuclear motion for molecules
+        damping_factor=0.999
+    )
+
+
+def run_simulation(simulation: UnifiedHybridMolecularSimulation, 
+                  video_filename: str = "unified_simulation.avi",
+                  fps: int = 24,
+                  time_steps: int = None) -> None:
+    """Run a unified molecular simulation and save video."""
+    
+    if time_steps is None:
+        time_steps = TIME_STEPS
+    
+    print(f"Starting unified molecular simulation...")
+    print(f"Output video: {video_filename}")
+    print(f"Steps: {time_steps}")
+    
+    # Set up video writer
+    video_writer = StreamingVideoWriter(
+        output_file=video_filename,
+        fps=fps,
+        sample_frames=50,
+        keep_first_batch=True,
+        first_batch_size=100
+    )
+    
+    # Run simulation
+    for step in range(time_steps):
+        if step % 100 == 0:
+            print(f"Step {step}/{time_steps}")
+            
+            # Report system state
+            if len(simulation.nuclei) == 1:
+                # Single atom
+                print(f"  Single atom simulation (Z={simulation.nuclei[0].atomic_number})")
+                print(f"  Electrons: {len(simulation.electron_infos)}")
+            elif len(simulation.nuclei) == 2:
+                # Diatomic molecule
+                dx = simulation.nuclei[1].position[0] - simulation.nuclei[0].position[0]
+                dy = simulation.nuclei[1].position[1] - simulation.nuclei[0].position[1]
+                bond_length = torch.sqrt(dx**2 + dy**2)
+                
+                print(f"  Bond length: {bond_length:.2f} pixels")
+                
+                # Get atomic character metrics if available
+                try:
+                    atomic_metrics = simulation.analyze_atomic_character()
+                    print(f"  Atomic character: {100*atomic_metrics['atomic_character']:.1f}%")
+                    print(f"  Molecular character: {100*atomic_metrics['molecular_character']:.1f}%")
+                except:
+                    pass
+            else:
+                # Multi-atom system
+                print(f"  Multi-atom system: {len(simulation.nuclei)} nuclei, {len(simulation.electron_infos)} electrons")
+        
+        # Evolve the system
+        simulation.evolve_step(step)
+        
+        # Get visualization data
+        combined_psi = simulation.get_combined_wavefunction()
+        
+        # Create frames
+        frame_real = torch.real(combined_psi).cpu().numpy()
+        frame_imag = torch.imag(combined_psi).cpu().numpy()
+        frame_phase = torch.angle(gaussian_filter_torch(combined_psi, sigma=1)).cpu().numpy()
+        frame_prob = torch.abs(combined_psi)**2
+        
+        # Normalize probability for visualization
+        if torch.max(frame_prob) > 0:
+            frame_prob = frame_prob / torch.max(frame_prob)
+        
+        frame_prob = frame_prob.cpu().numpy()
+        
+        video_writer.add_frame(frame_real, frame_imag, frame_phase, frame_prob)
+    
+    # Finalize video
+    video_writer.finalize()
+    print(f"Simulation complete! Video saved as {video_filename}")
+    
+    # Open video for viewing
+    try:
+        open_video(video_filename)
+    except Exception as e:
+        print(f"Could not open video automatically: {e}")
+
+
+# Legacy function for backward compatibility
 def create_unified_hydrogen_molecule_simulation() -> UnifiedHybridMolecularSimulation:
     """Create a unified H2 molecule simulation with combined wavefunction that preserves atomic character."""
     # Molecular parameters - closer spacing to see interaction
@@ -283,12 +518,18 @@ def run_unified_molecular_simulation(simulation: UnifiedHybridMolecularSimulatio
 
 
 if __name__ == "__main__":
-    print("=== Unified Hybrid Molecular Simulation ===")
-    print("Combined electron wavefunction + proper antisymmetrization")
+    print("=== Generic Unified Molecular Simulation Framework ===")
+    print("Demonstrating hydrogen molecule creation with new framework")
     print()
     
-    # Test 1: Unified H2 molecule
-    print("1. Creating unified H2 molecule simulation...")
-    sim1 = create_unified_hydrogen_molecule_simulation()
-    run_unified_molecular_simulation(sim1, "unified_hybrid_h2.avi")
-    print("Simulation complete!")
+    # Create hydrogen molecule using new generic framework
+    hydrogen_configs = [
+        AtomConfig(atomic_number=1, position=(center_x - 24, center_y), 
+                  electron_configs=[(1, 0, 0)]),  # H atom 1
+        AtomConfig(atomic_number=1, position=(center_x + 24, center_y), 
+                  electron_configs=[(1, 0, 0)])   # H atom 2
+    ]
+    
+    print("Creating H2 molecule with generic framework...")
+    h2_simulation = create_molecule_simulation(hydrogen_configs, bond_type="bonding")
+    run_simulation(h2_simulation, "generic_h2_molecule.avi", time_steps=1000)

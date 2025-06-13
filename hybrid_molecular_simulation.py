@@ -435,7 +435,7 @@ class HybridMolecularSimulation:
         # Use global X, Y tensors for grid coordinates
         
         # Distance from edges
-        edge_width = 30  # Wider absorbing region for stronger effect
+        edge_width = 80  # Wider absorbing region for stronger effect
         x_dist_left = X
         x_dist_right = SIZE - 1 - X
         y_dist_top = Y  
@@ -448,14 +448,14 @@ class HybridMolecularSimulation:
         )
         
         # Create absorbing mask (1.0 in center, decays more strongly at edges)
-        absorption_strength = 10  # Much stronger absorption to eliminate reflections
+        absorption_strength = 1  # Much stronger absorption to eliminate reflections
         absorption_region = torch.maximum(
             torch.tensor(0.0, device=wavefunction.device), 
             edge_width - edge_dist
         )
         
         # Use quadratic falloff for stronger absorption near edges
-        mask = torch.exp(-absorption_strength * (absorption_region / edge_width) ** 4)
+        mask = torch.exp(-absorption_strength * (absorption_region / edge_width) ** 2)
         
         # Apply absorption
         return wavefunction * mask

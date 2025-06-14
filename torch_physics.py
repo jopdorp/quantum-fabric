@@ -38,39 +38,62 @@ class WavePropagationModel(nn.Module):
         self.shape = shape
         self.dt = dt
         
-        # Pre-compute and register kinetic phase as buffer (not trainable)
-        kx = torch.fft.fftfreq(shape[1], d=1.0, device=device) * (2 * torch.pi)
-        ky = torch.fft.fftfreq(shape[0], d=1.0, device=device) * (2 * torch.pi)
-        KY, KX = torch.meshgrid(ky, kx, indexing='ij')
+        # Pre-compute and register kinetic phase as buffer (not trainable) - 3D
+        if len(shape) == 3:  # 3D case
+            kx = torch.fft.fftfreq(shape[2], d=1.0, device=device) * (2 * torch.pi)
+            ky = torch.fft.fftfreq(shape[1], d=1.0, device=device) * (2 * torch.pi)
+            kz = torch.fft.fftfreq(shape[0], d=1.0, device=device) * (2 * torch.pi)
+            KZ, KY, KX = torch.meshgrid(kz, ky, kx, indexing='ij')
+            
+            kinetic_phase = torch.exp(-1j * dt * (KX**2 + KY**2 + KZ**2) * 0.5)
+        else:  # 2D case (backward compatibility)
+            kx = torch.fft.fftfreq(shape[1], d=1.0, device=device) * (2 * torch.pi)
+            ky = torch.fft.fftfreq(shape[0], d=1.0, device=device) * (2 * torch.pi)
+            KY, KX = torch.meshgrid(ky, kx, indexing='ij')
+            
+            kinetic_phase = torch.exp(-1j * dt * (KX**2 + KY**2) * 0.5)
         
-        kinetic_phase = torch.exp(-1j * dt * (KX**2 + KY**2) * 0.5)
         self.register_buffer('kinetic_phase', kinetic_phase)
         
     def forward(self, psi, potential):
-        """Split-step propagation: V/2 -> T -> V/2"""
+        """Split-step propagation: V/2 -> T -> V/2 - supports both 2D and 3D"""
         potential_phase = torch.exp(-1j * self.dt * potential * 0.5)
         
         # Split-step propagation
         psi = psi * potential_phase
-        psi_hat = torch.fft.fft2(psi)
-        psi_hat = psi_hat * self.kinetic_phase
-        psi = torch.fft.ifft2(psi_hat)
+        
+        if len(psi.shape) == 3:  # 3D case
+            psi_hat = torch.fft.fftn(psi)
+            psi_hat = psi_hat * self.kinetic_phase
+            psi = torch.fft.ifftn(psi_hat)
+        else:  # 2D case
+            psi_hat = torch.fft.fft2(psi)
+            psi_hat = psi_hat * self.kinetic_phase
+            psi = torch.fft.ifft2(psi_hat)
+        
         psi = psi * potential_phase
         
         return psi
         
     def forward_batch(self, psi_batch, potential_batch):
-        """Batched split-step propagation for multiple electrons simultaneously"""
-        # psi_batch shape: [N_electrons, H, W]
-        # potential_batch shape: [N_electrons, H, W]
+        """Batched split-step propagation for multiple electrons simultaneously - supports 2D and 3D"""
+        # psi_batch shape: [N_electrons, H, W] for 2D or [N_electrons, D, H, W] for 3D
+        # potential_batch shape: [N_electrons, H, W] for 2D or [N_electrons, D, H, W] for 3D
         
         potential_phase = torch.exp(-1j * self.dt * potential_batch * 0.5)
         
         # Split-step propagation with batching
         psi_batch = psi_batch * potential_phase
-        psi_hat_batch = torch.fft.fft2(psi_batch, dim=(-2, -1))  # FFT over spatial dims
-        psi_hat_batch = psi_hat_batch * self.kinetic_phase.unsqueeze(0)  # Broadcast kinetic phase
-        psi_batch = torch.fft.ifft2(psi_hat_batch, dim=(-2, -1))
+        
+        if len(psi_batch.shape) == 4:  # 3D case: [N_electrons, D, H, W]
+            psi_hat_batch = torch.fft.fftn(psi_batch, dim=(-3, -2, -1))  # FFT over spatial dims
+            psi_hat_batch = psi_hat_batch * self.kinetic_phase.unsqueeze(0)  # Broadcast kinetic phase
+            psi_batch = torch.fft.ifftn(psi_hat_batch, dim=(-3, -2, -1))
+        else:  # 2D case: [N_electrons, H, W]
+            psi_hat_batch = torch.fft.fft2(psi_batch, dim=(-2, -1))  # FFT over spatial dims
+            psi_hat_batch = psi_hat_batch * self.kinetic_phase.unsqueeze(0)  # Broadcast kinetic phase
+            psi_batch = torch.fft.ifft2(psi_hat_batch, dim=(-2, -1))
+        
         psi_batch = psi_batch * potential_phase
         
         return psi_batch
@@ -83,14 +106,26 @@ class LaplacianWaveModel(nn.Module):
         
         # Pre-compute Laplacian finite difference kernels
         # Second derivative approximation: f''(x) ≈ (f(x+h) - 2f(x) + f(x-h))/h²
-        # For 2D Laplacian: ∇²ψ = ∂²ψ/∂x² + ∂²ψ/∂y²
         
-        # 5-point stencil Laplacian kernel
-        laplacian_kernel = torch.tensor([
-            [0.0,  1.0, 0.0],
-            [1.0, -4.0, 1.0], 
-            [0.0,  1.0, 0.0]
-        ], dtype=torch.complex64, device=device).unsqueeze(0).unsqueeze(0)
+        if len(shape) == 3:  # 3D Laplacian
+            # 7-point stencil for 3D Laplacian: ∇²ψ = ∂²ψ/∂x² + ∂²ψ/∂y² + ∂²ψ/∂z²
+            laplacian_kernel = torch.zeros((1, 1, 3, 3, 3), dtype=torch.complex64, device=device)
+            # Center point
+            laplacian_kernel[0, 0, 1, 1, 1] = -6.0
+            # 6 face neighbors
+            laplacian_kernel[0, 0, 0, 1, 1] = 1.0  # z-1
+            laplacian_kernel[0, 0, 2, 1, 1] = 1.0  # z+1
+            laplacian_kernel[0, 0, 1, 0, 1] = 1.0  # y-1
+            laplacian_kernel[0, 0, 1, 2, 1] = 1.0  # y+1
+            laplacian_kernel[0, 0, 1, 1, 0] = 1.0  # x-1
+            laplacian_kernel[0, 0, 1, 1, 2] = 1.0  # x+1
+        else:  # 2D Laplacian
+            # 5-point stencil Laplacian kernel
+            laplacian_kernel = torch.tensor([
+                [0.0,  1.0, 0.0],
+                [1.0, -4.0, 1.0], 
+                [0.0,  1.0, 0.0]
+            ], dtype=torch.complex64, device=device).unsqueeze(0).unsqueeze(0)
         
         self.register_buffer('laplacian_kernel', laplacian_kernel)
         

@@ -26,19 +26,9 @@ from scipy.special import genlaguerre
 import numpy as np
 
 # Import existing components
-from config import SIZE, TIME_STEPS, SCALE, center_x, center_y, POTENTIAL_STRENGTH, NUCLEAR_REPULSION_STRENGTH, NUCLEAR_CORE_RADIUS
+from config import SIZE_X, SIZE_Y, SIZE_Z, TIME_STEPS, SCALE, center_x, center_y, center_z, POTENTIAL_STRENGTH, NUCLEAR_REPULSION_STRENGTH, NUCLEAR_CORE_RADIUS, DEVICE, X, Y, Z
 from torch_physics import propagate_wave_batch_with_potentials
 from video_utils import StreamingVideoWriter, open_video
-
-# X, Y = np.meshgrid(np.arange(GRID_WIDTH), np.arange(GRID_HEIGHT))
-# set torch default device to xpu
-torch.set_default_device('xpu')
-
-X, Y = torch.meshgrid(
-    torch.arange(SIZE, dtype=torch.float32),
-    torch.arange(SIZE, dtype=torch.float32),
-    indexing='ij'
-)
 
 def gaussian(M, std, device=None):
     """PyTorch version of Gaussian window function"""
@@ -53,7 +43,7 @@ def gaussian(M, std, device=None):
     return w / w.sum()  # Normalize
 
 def gaussian_filter_torch(input_tensor, sigma):
-    """PyTorch implementation of Gaussian filter using separable convolution"""
+    """PyTorch implementation of Gaussian filter using separable convolution - supports 2D and 3D"""
     device = input_tensor.device
     
     # Handle complex tensors
@@ -68,185 +58,160 @@ def gaussian_filter_torch(input_tensor, sigma):
     # Create 1D Gaussian kernel
     kernel_1d = gaussian(kernel_size, sigma, device=device)
     
-    # Reshape for convolution: [out_channels, in_channels, kernel_size]
-    kernel_h = kernel_1d.view(1, 1, kernel_size)  # Horizontal kernel
-    kernel_v = kernel_1d.view(1, 1, kernel_size, 1)  # Vertical kernel
+    if len(input_tensor.shape) == 3:  # 3D case
+        # Add batch and channel dimensions to input
+        input_5d = input_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, D, H, W]
+        
+        # Apply separable 3D convolution
+        # First apply along Z dimension
+        kernel_z = kernel_1d.view(1, 1, kernel_size, 1, 1)
+        padding_z = kernel_size // 2
+        filtered_z = F.conv3d(input_5d, kernel_z, padding=(padding_z, 0, 0))
+        
+        # Then apply along Y dimension
+        kernel_y = kernel_1d.view(1, 1, 1, kernel_size, 1)
+        padding_y = kernel_size // 2
+        filtered_zy = F.conv3d(filtered_z, kernel_y, padding=(0, padding_y, 0))
+        
+        # Finally apply along X dimension
+        kernel_x = kernel_1d.view(1, 1, 1, 1, kernel_size)
+        padding_x = kernel_size // 2
+        filtered_zyx = F.conv3d(filtered_zy, kernel_x, padding=(0, 0, padding_x))
+        
+        # Remove batch and channel dimensions
+        return filtered_zyx.squeeze(0).squeeze(0)
     
-    # Add batch and channel dimensions to input
-    input_4d = input_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
-    
-    # Apply separable convolution
-    # First apply horizontal filter
-    padding_h = kernel_size // 2
-    filtered_h = F.conv2d(input_4d, kernel_h.unsqueeze(2), padding=(0, padding_h))
-    
-    # Then apply vertical filter
-    padding_v = kernel_size // 2
-    filtered_hv = F.conv2d(filtered_h, kernel_v, padding=(padding_v, 0))
-    
-    # Remove batch and channel dimensions
-    return filtered_hv.squeeze(0).squeeze(0)
+    else:  # 2D case (backward compatibility)
+        # Reshape for convolution: [out_channels, in_channels, kernel_size]
+        kernel_h = kernel_1d.view(1, 1, kernel_size)  # Horizontal kernel
+        kernel_v = kernel_1d.view(1, 1, kernel_size, 1)  # Vertical kernel
+        
+        # Add batch and channel dimensions to input
+        input_4d = input_tensor.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
+        
+        # Apply separable convolution
+        # First apply horizontal filter
+        padding_h = kernel_size // 2
+        filtered_h = F.conv2d(input_4d, kernel_h.unsqueeze(2), padding=(0, padding_h))
+        
+        # Then apply vertical filter
+        padding_v = kernel_size // 2
+        filtered_hv = F.conv2d(filtered_h, kernel_v, padding=(padding_v, 0))
+        
+        # Remove batch and channel dimensions
+        return filtered_hv.squeeze(0).squeeze(0)
 
-def create_atom_electron(x_tensor, y_tensor, cx, cy, quantum_numbers, atomic_number=1, alpha=None, scale=SCALE):
-    """Create atomic orbital wavefunctions for any element using quantum mechanical principles.
+def create_atom_electron(x_tensor, y_tensor, z_tensor, cx, cy, cz, quantum_numbers, atomic_number=1, alpha=None, scale=SCALE):
+    """Create 3D atomic orbital wavefunctions using pure PyTorch for GPU acceleration.
     
-    This is a generic atomic orbital generator that works for:
-    - Hydrogen and hydrogen-like ions (He⁺, Li²⁺, etc.)
-    - Multi-electron atoms (C, N, O, etc.) using simple electron screening
-    - Any quantum numbers (n, l, m) with proper 3D→2D projections
-    
-    Features:
-    - Radial part: Associated Laguerre polynomials with proper normalization
-    - Angular part: Real spherical harmonics projected to 2D plane  
-    - Physics-based orbital scaling using simulation parameters
-    - Simple universal electron screening based on orbital type and nuclear charge
-    
-    For dynamic behavior (momentum, orbital offset), use apply_wavefunction_dynamics() 
-    after creating the static orbital.
+    This is a fully GPU-accelerated 3D atomic orbital generator.
     
     Args:
-        x, y: coordinate grids
-        cx, cy: center position (nucleus location)
+        x, y, z: coordinate grids (3D torch tensors)
+        cx, cy, cz: center position (nucleus location)
         quantum_numbers: (n, l, m) quantum numbers
         atomic_number: nuclear charge Z (default: 1 for hydrogen)
         alpha: screening parameter for Z_eff (default: auto-calculated)
     
     Returns:
-        Complex wavefunction representing the atomic orbital
-        
-    Examples:
-        # Hydrogen 1s orbital
-        psi = create_atom_electron(X, Y, cx, cy, (1,0,0), atomic_number=1)
-        
-        # Carbon 2p orbital
-        psi = create_atom_electron(X, Y, cx, cy, (2,1,0), atomic_number=6)
-        
-        # Add dynamics after creation
-        psi = apply_wavefunction_dynamics(psi, X, Y, cx, cy, momentum_x=0.1, orbital_offset_x=2)
+        Complex wavefunction representing the 3D atomic orbital (torch tensor)
     """
     n, l, m = quantum_numbers
-    x = x_tensor.cpu().numpy()
-    y = y_tensor.cpu().numpy()
+    device = x_tensor.device
+    
     # Calculate screening parameter (alpha) using a simple universal formula
     if alpha is None:
         if atomic_number == 1:
-            # Pure hydrogen - no screening
             alpha = 1.0
         else:
-            # Simple universal screening: inner electrons reduce effective charge
-            # For multi-electron atoms, each inner electron screens ~0.3-0.9 of nuclear charge
-            # Core electrons (1s, 2s, 2p) screen more effectively than valence electrons
-            
-            # Count inner electrons (rough approximation)
-            inner_electrons = max(0, atomic_number - 2)  # Subtract valence electrons
-            
-            # Screening efficiency depends on orbital type
-            if l == 0:    # s orbitals penetrate more, less screening
+            # Simple universal screening for multi-electron atoms
+            inner_electrons = max(0, atomic_number - 2)
+            if l == 0:
                 screening_per_electron = 0.25
-            elif l == 1:  # p orbitals
+            elif l == 1:
                 screening_per_electron = 0.35  
-            elif l == 2:  # d orbitals
+            elif l == 2:
                 screening_per_electron = 0.45
-            else:         # f and higher orbitals
+            else:
                 screening_per_electron = 0.50
             
-            # Additional screening for higher n (outer orbitals)
             n_factor = 1.0 + 0.1 * (n - 1)
-            
             total_screening = inner_electrons * screening_per_electron * n_factor
             z_eff = atomic_number - total_screening
-            alpha = max(z_eff / atomic_number, 0.1)  # Prevent negative screening
+            alpha = max(z_eff / atomic_number, 0.1)
     
     # Calculate effective nuclear charge
     z_eff = atomic_number * alpha
     
-    # Calculate physics-based Bohr radius
-    # The stable orbital size is determined by the balance of kinetic and potential energy
-    # In our simulation units: a₀ ≈ 1/√(POTENTIAL_STRENGTH * Z_eff)
-    bohr_radius = scale / np.sqrt(POTENTIAL_STRENGTH * z_eff)
-    
-    # Orbital size scales with n² for all atoms (using effective nuclear charge)
+    # Calculate physics-based Bohr radius using torch
+    bohr_radius = scale / torch.sqrt(torch.tensor(POTENTIAL_STRENGTH * z_eff, device=device))
     orbital_radius = bohr_radius * n**2
     
-    # Create coordinates relative to center
-    dx = x - cx
-    dy = y - cy
-    r = np.sqrt(dx**2 + dy**2)
-    theta = np.arctan2(dy, dx)
+    # Create coordinates relative to center (pure torch)
+    dx = x_tensor - cx
+    dy = y_tensor - cy
+    dz = z_tensor - cz
+    r = torch.sqrt(dx**2 + dy**2 + dz**2)
+    
+    # Spherical coordinates
+    theta = torch.acos(torch.clamp(dz / (r + 1e-10), -1.0, 1.0))  # Polar angle (0 to π)
+    phi = torch.atan2(dy, dx)  # Azimuthal angle (0 to 2π)
     
     # Create atomic radial wavefunction using effective nuclear charge
-    rho = 2 * z_eff * r / (n * orbital_radius)  # Proper dimensionless radius
+    rho = 2 * z_eff * r / (n * orbital_radius)
     
-    # Use proper Laguerre polynomials for accurate radial shapes
-    try:
-        norm_factor = np.sqrt((2*z_eff/(n*orbital_radius))**3 * math.factorial(n-l-1) / (2*n*math.factorial(n+l)))
-        laguerre_poly = genlaguerre(n-l-1, 2*l+1)(rho)
-        radial = norm_factor * (rho**l) * np.exp(-rho/2) * laguerre_poly
-    except (OverflowError, ValueError):
-        # Fallback for very high quantum numbers - enhanced with oscillations
-        oscillations = 1 + 0.8 * np.cos(np.pi * rho * (n-l-1) / n) + 0.3 * np.cos(2*np.pi * rho * (n-l-1) / n)
-        radial = (rho**l) * np.exp(-rho/2) * oscillations
+    # Simplified radial function for GPU efficiency (avoids scipy)
+    # For s orbitals (l=0): R ~ exp(-rho/2)
+    # For p orbitals (l=1): R ~ rho * exp(-rho/2)  
+    # For d orbitals (l=2): R ~ rho^2 * exp(-rho/2)
+    radial = (rho**l) * torch.exp(-rho/2)
     
-    # Create angular part - proper 3D→2D orbital projections with distinct shapes
+    # Add oscillations for higher n quantum numbers
+    if n > 1:
+        oscillations = 1 + 0.8 * torch.cos(torch.pi * rho * (n-l-1) / n)
+        radial = radial * oscillations
+    
+    # Create angular part using simplified real spherical harmonics
     if l == 0:  # s orbitals - spherically symmetric
-        angular = 1.0 + 0j
-        
-    elif l == 1:  # p orbitals - distinct dumbbell patterns
+        angular = torch.ones_like(theta)
+    elif l == 1:  # p orbitals
         if m == -1:
-            # p_y orbital → vertical dumbbell
-            angular = np.sin(theta)
+            angular = torch.sin(theta) * torch.sin(phi)  # p_y
         elif m == 0:
-            # p_z → when projected to xy-plane, creates horizontal dumbbell
-            angular = np.cos(theta)
+            angular = torch.cos(theta)                    # p_z  
         elif m == 1:
-            # p_x orbital → rotated dumbbell at 45°
-            angular = np.cos(theta + torch.pi/4)
-            
-    elif l == 2:  # d orbitals - cloverleaf and other complex patterns
+            angular = torch.sin(theta) * torch.cos(phi)   # p_x
+    elif l == 2:  # d orbitals
         if m == -2:
-            # d_xy orbital → 4-lobe cloverleaf rotated
-            angular = np.sin(2*theta)
+            angular = torch.sin(theta)**2 * torch.sin(2*phi)  # d_xy
         elif m == -1:
-            # d_yz orbital → 4-lobe pattern
-            angular = np.sin(theta) * np.cos(theta)
+            angular = torch.sin(theta) * torch.cos(theta) * torch.sin(phi)  # d_yz
         elif m == 0:
-            # d_z² orbital → distinctive pattern with central lobe and ring
-            angular = (3*np.cos(theta)**2 - 1) + 0.5*np.sin(2*theta)
+            angular = 3*torch.cos(theta)**2 - 1  # d_z²
         elif m == 1:
-            # d_xz orbital → different 4-lobe orientation
-            angular = np.sin(theta) * np.sin(theta + np.pi/2)
+            angular = torch.sin(theta) * torch.cos(theta) * torch.cos(phi)  # d_xz
         elif m == 2:
-            # d_x²-y² orbital → 4-lobe cloverleaf aligned with axes
-            angular = torch.cos(2*theta)
-            
-    else:  # Higher l orbitals - create more complex patterns
-        # Create increasingly complex angular patterns for higher l
-        base_pattern = np.cos(l * theta) + 0.5 * np.sin((l+1) * theta)
-        m_modulation = np.cos(m * theta + np.pi/4)
-        angular = base_pattern * m_modulation
+            angular = torch.sin(theta)**2 * torch.cos(2*phi)  # d_x²-y²
+    else:  # Higher l orbitals - simplified patterns
+        angular = torch.cos(l * phi) * (torch.sin(theta)**l)
     
     # Combine radial and angular parts
     psi = radial * angular
     
-    # Add gentle envelope for better visualization
-    envelope = np.exp(-r**2/(2*(orbital_radius*0.6)**2))
-    psi = psi * envelope
+    # Convert to complex tensor
+    psi = psi.to(torch.complex64)
     
-    # Ensure psi is complex before applying perturbations
-    psi = psi.astype(np.complex64)
-    
-    # Ensure proper normalization 
-    norm_factor = np.sqrt(np.sum(np.abs(psi)**2))
+    # Normalization (GPU accelerated)
+    norm_factor = torch.sqrt(torch.sum(torch.abs(psi)**2))
     if norm_factor > 0:
         psi = psi / norm_factor
-
-    # return as torch tensor
-    return torch.tensor(psi, dtype=torch.complex64)
+    
+    return psi
 
 
 class MolecularElectron:
     def __init__(self, wavefunction: torch.Tensor, atom_id: int, electron_name: str = "electron"):
-        self.wavefunction = torch.tensor(wavefunction, dtype=torch.complex64)
+        self.wavefunction = wavefunction.detach().clone().to(torch.complex64)
         self.atom_id = atom_id  # Which atom this electron belongs to
         self.name = electron_name
         self.normalize()
@@ -261,14 +226,30 @@ class MolecularElectron:
 
 
 class MolecularNucleus:
-    """Enhanced nucleus class with molecular properties."""
+    """Enhanced nucleus class with molecular properties - supports 3D."""
     
-    def __init__(self, x: float, y: float, atomic_number: int = 1, atom_id: int = 0):
-        self.position = torch.tensor([x, y], dtype=torch.float32)
-        self.velocity = torch.zeros(2, dtype=torch.float32)
+    def __init__(self, x: float, y: float, z: float = None, atomic_number: int = 1, atom_id: int = 0):
+        if z is None:  # Backward compatibility for 2D
+            self.position = torch.tensor([x, y], dtype=torch.float32, requires_grad=False)
+            self.velocity = torch.zeros(2, dtype=torch.float32, requires_grad=False)
+        else:  # 3D mode
+            self.position = torch.tensor([x, y, z], dtype=torch.float32, requires_grad=False)
+            self.velocity = torch.zeros(3, dtype=torch.float32, requires_grad=False)
         self.atomic_number = atomic_number
         self.atom_id = atom_id
         self.mass_ratio = 1836.0  # Proton to electron mass ratio
+        
+    @property
+    def x(self):
+        return self.position[0].item()
+    
+    @property 
+    def y(self):
+        return self.position[1].item()
+    
+    @property
+    def z(self):
+        return self.position[2].item() if len(self.position) > 2 else 0.0
 
 
 class HybridMolecularSimulation:
@@ -303,14 +284,23 @@ class HybridMolecularSimulation:
         """
         Compute the total potential experienced by one electron.
         Includes nuclear attraction + repulsion from other electrons.
+        Supports both 2D and 3D.
         """
-        potential = torch.zeros_like(X, dtype=torch.float32)
+        if len(self.electrons[0].wavefunction.shape) == 3:  # 3D case
+            potential = torch.zeros_like(X, dtype=torch.float32)
+        else:  # 2D case
+            potential = torch.zeros_like(X, dtype=torch.float32)
         
         # Nuclear attraction potentials
         for nucleus in self.nuclei:
-            V_nuclear = self.create_nucleus_potential(
-                X, Y, nucleus.position[0], nucleus.position[1], nucleus.atomic_number
-            )
+            if len(nucleus.position) == 3:  # 3D nucleus
+                V_nuclear = self.create_nucleus_potential_3d(
+                    X, Y, Z, nucleus.position[0], nucleus.position[1], nucleus.position[2], nucleus.atomic_number
+                )
+            else:  # 2D nucleus
+                V_nuclear = self.create_nucleus_potential_2d(
+                    X, Y, nucleus.position[0], nucleus.position[1], nucleus.atomic_number
+                )
             potential += V_nuclear
         
         # Electron-electron repulsion (from all OTHER electrons)
@@ -326,8 +316,8 @@ class HybridMolecularSimulation:
         
         return potential
     
-    def create_nucleus_potential(self, x, y, nucleus_x, nucleus_y, charge=1):
-        """Create a more realistic nucleus potential with short-range repulsion."""
+    def create_nucleus_potential_2d(self, x, y, nucleus_x, nucleus_y, charge=1):
+        """Create a 2D nucleus potential with short-range repulsion."""
         r = torch.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2)
         r = torch.maximum(r, torch.tensor(0.1, dtype=torch.float32))
         
@@ -335,10 +325,27 @@ class HybridMolecularSimulation:
         coulomb_attraction = -POTENTIAL_STRENGTH * charge / r
         
         # Short-range repulsion to prevent collapse into nucleus (models quantum effects)
-        # This represents the Pauli exclusion principle and quantum uncertainty
         nuclear_repulsion = NUCLEAR_REPULSION_STRENGTH * torch.exp(-r / NUCLEAR_CORE_RADIUS) / (r + 0.1)
         
         return coulomb_attraction + nuclear_repulsion
+    
+    def create_nucleus_potential_3d(self, x, y, z, nucleus_x, nucleus_y, nucleus_z, charge=1):
+        """Create a 3D nucleus potential with short-range repulsion."""
+        r = torch.sqrt((x - nucleus_x)**2 + (y - nucleus_y)**2 + (z - nucleus_z)**2)
+        r = torch.maximum(r, torch.tensor(0.1, dtype=torch.float32))
+        
+        # Long-range Coulomb attraction: V = -k*Z/r (attractive for electrons)
+        coulomb_attraction = -POTENTIAL_STRENGTH * charge / r
+        
+        # Short-range repulsion to prevent collapse into nucleus (models quantum effects)
+        nuclear_repulsion = NUCLEAR_REPULSION_STRENGTH * torch.exp(-r / NUCLEAR_CORE_RADIUS) / (r + 0.1)
+        
+        return coulomb_attraction + nuclear_repulsion
+
+    # Backward compatibility
+    def create_nucleus_potential(self, x, y, nucleus_x, nucleus_y, charge=1):
+        """Backward compatibility wrapper."""
+        return self.create_nucleus_potential_2d(x, y, nucleus_x, nucleus_y, charge)
 
     def compute_all_electron_potentials(self) -> List[torch.Tensor]:
         """Compute potentials for all electrons efficiently."""
@@ -426,20 +433,27 @@ class HybridMolecularSimulation:
     
     def apply_absorbing_boundaries(self, wavefunction: torch.Tensor) -> torch.Tensor:
         # Create circular absorbing mask - exponential decay near circular boundary
-        # Use global X, Y tensors for grid coordinates
+        # Use global X, Y, Z tensors for grid coordinates
         
         # Calculate distance from center of simulation domain
-        center_x_pos = SIZE / 2.0
-        center_y_pos = SIZE / 2.0
-        r = torch.sqrt((X - center_x_pos)**2 + (Y - center_y_pos)**2)
+        if len(wavefunction.shape) == 3:  # 3D case
+            center_x_pos = SIZE_X / 2.0
+            center_y_pos = SIZE_Y / 2.0
+            center_z_pos = SIZE_Z / 2.0
+            r = torch.sqrt((X - center_x_pos)**2 + (Y - center_y_pos)**2 + (Z - center_z_pos)**2)
+            max_radius = min(SIZE_X, SIZE_Y, SIZE_Z) / 2.0 * 0.9  # Spherical boundary
+        else:  # 2D case
+            center_x_pos = SIZE_X / 2.0
+            center_y_pos = SIZE_Y / 2.0
+            r = torch.sqrt((X - center_x_pos)**2 + (Y - center_y_pos)**2)
+            max_radius = min(SIZE_X, SIZE_Y) / 2.0 * 0.9  # Circular boundary
         
-        # Define circular boundary parameters
-        max_radius = min(center_x_pos, center_y_pos) * 0.9  # Leave some margin from actual edges
+        # Define boundary parameters
         absorption_width = 20  # Width of absorption region
         absorption_start = max_radius - absorption_width
         
-        # Create circular absorbing mask
-        absorption_strength = 1.2  # Stronger absorption for circular boundaries
+        # Create absorbing mask
+        absorption_strength = 1.2  # Stronger absorption for boundaries
         
         # Only apply absorption outside the absorption start radius
         absorption_region = torch.maximum(
@@ -486,10 +500,10 @@ class HybridMolecularSimulation:
         
         # Update electron wavefunctions
         for i, electron in enumerate(self.electrons):
-            electron.wavefunction = torch.tensor(evolved_psi_list[i], dtype=torch.complex64)
+            electron.wavefunction = evolved_psi_list[i].detach().clone().to(torch.complex64)
             wf_numpy = electron.wavefunction
             wf_limited = self.apply_absorbing_boundaries(wf_numpy)
-            electron.wavefunction = torch.tensor(wf_limited, dtype=torch.complex64)
+            electron.wavefunction = wf_limited.detach().clone().to(torch.complex64)
             electron.normalize()
         
         # Update nuclear positions if enabled
@@ -506,8 +520,13 @@ class HybridMolecularSimulation:
                 nucleus.velocity *= self.damping_factor
                 
                 # Keep nuclei within simulation bounds
-                nucleus.position[0] = torch.clip(nucleus.position[0], SIZE//8, 7*SIZE//8)
-                nucleus.position[1] = torch.clip(nucleus.position[1], SIZE//8, 7*SIZE//8)
+                if len(nucleus.position) == 3:  # 3D case
+                    nucleus.position[0] = torch.clip(nucleus.position[0], SIZE_X//8, 7*SIZE_X//8)
+                    nucleus.position[1] = torch.clip(nucleus.position[1], SIZE_Y//8, 7*SIZE_Y//8)
+                    nucleus.position[2] = torch.clip(nucleus.position[2], SIZE_Z//8, 7*SIZE_Z//8)
+                else:  # 2D case
+                    nucleus.position[0] = torch.clip(nucleus.position[0], SIZE_X//8, 7*SIZE_X//8)
+                    nucleus.position[1] = torch.clip(nucleus.position[1], SIZE_Y//8, 7*SIZE_Y//8)
     
     def get_combined_density(self) -> torch.Tensor:
         """Get combined electron density for visualization."""

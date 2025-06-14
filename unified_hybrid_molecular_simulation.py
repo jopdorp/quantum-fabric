@@ -20,9 +20,9 @@ from typing import List, Tuple
 # Import everything from the hybrid molecular simulation
 from hybrid_molecular_simulation import (
     HybridMolecularSimulation, MolecularElectron, MolecularNucleus, 
-    create_atom_electron, gaussian_filter_torch, X, Y
+    create_atom_electron, gaussian_filter_torch
 )
-from config import TIME_STEPS, SCALE, center_x, center_y
+from config import TIME_STEPS, SCALE, center_x, center_y, center_z, X, Y, Z
 from video_utils import StreamingVideoWriter, open_video
 
 class ElectronInfo:
@@ -35,11 +35,24 @@ class ElectronInfo:
 
 
 class AtomConfig:
-    """Configuration for creating an atom with its electrons"""
-    def __init__(self, atomic_number: int, position: Tuple[float, float], 
+    """Configuration for creating an atom with its electrons - supports 3D"""
+    def __init__(self, atomic_number: int, position: Tuple[float, float, float] = None, 
+                 position_2d: Tuple[float, float] = None,
                  electron_configs: List[Tuple[int, int, int]] = None):
         self.atomic_number = atomic_number
-        self.position = position
+        
+        # Support both 2D and 3D positioning
+        if position is not None:
+            self.position = position  # 3D position (x, y, z)
+            self.is_3d = True
+        elif position_2d is not None:
+            self.position = position_2d  # 2D position (x, y)
+            self.is_3d = False
+        else:
+            # Default to center
+            self.position = (center_x, center_y, center_z)
+            self.is_3d = True
+            
         self.electron_configs = electron_configs or self._default_electron_config()
     
     def _default_electron_config(self) -> List[Tuple[int, int, int]]:
@@ -199,10 +212,17 @@ class UnifiedHybridMolecularSimulation(HybridMolecularSimulation):
         }
     
 def create_atom_simulation(atom_config: AtomConfig) -> UnifiedHybridMolecularSimulation:
-    """Create a unified simulation for a single atom."""
+    """Create a unified simulation for a single atom - supports both 2D and 3D."""
+    
     # Create nucleus
-    nuclei = [MolecularNucleus(atom_config.position[0], atom_config.position[1], 
-                              atomic_number=atom_config.atomic_number, atom_id=0)]
+    if atom_config.is_3d and len(atom_config.position) == 3:
+        # 3D nucleus
+        nuclei = [MolecularNucleus(atom_config.position[0], atom_config.position[1], atom_config.position[2],
+                                  atomic_number=atom_config.atomic_number, atom_id=0)]
+    else:
+        # 2D nucleus (backward compatibility)
+        nuclei = [MolecularNucleus(atom_config.position[0], atom_config.position[1], 
+                                  atomic_number=atom_config.atomic_number, atom_id=0)]
     
     # Create electron wavefunctions and info
     print(f"Creating {len(atom_config.electron_configs)} electrons for {atom_config.atomic_number}-electron atom...")
@@ -213,10 +233,24 @@ def create_atom_simulation(atom_config: AtomConfig) -> UnifiedHybridMolecularSim
     for i, (n, l, m) in enumerate(atom_config.electron_configs):
         print(f"  Creating electron {i+1}: {n}{['s','p','d','f'][l]} orbital")
         
-        # Create wavefunction
-        psi = create_atom_electron(X, Y, atom_config.position[0], atom_config.position[1], 
-                                  (n, l, m), atomic_number=atom_config.atomic_number, 
-                                  scale=SCALE/10)
+        # Create wavefunction - automatically detect 2D vs 3D from coordinate system
+        if len(X.shape) == 3:  # 3D coordinate system
+            # 3D electron wavefunction
+            psi = create_atom_electron(X, Y, Z, atom_config.position[0], atom_config.position[1], 
+                                      atom_config.position[2] if len(atom_config.position) > 2 else center_z,
+                                      (n, l, m), atomic_number=atom_config.atomic_number, 
+                                      scale=SCALE/10)
+        else:
+            # 2D electron wavefunction - create a dummy Z coordinate
+            # We'll need to add backward compatibility to create_atom_electron
+            psi = create_atom_electron(X, Y, torch.zeros_like(X), 
+                                      atom_config.position[0], atom_config.position[1], 0.0,
+                                      (n, l, m), atomic_number=atom_config.atomic_number, 
+                                      scale=SCALE/10)
+            # For 2D, take the middle slice of the 3D result
+            if len(psi.shape) == 3:
+                psi = psi[:, :, psi.shape[2]//2]
+        
         electron_wavefunctions.append(psi)
         
         # Create electron info

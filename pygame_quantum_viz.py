@@ -28,8 +28,9 @@ class PygameQuantumViz:
         self.evolution_step = 0
         self.max_evolution_steps = 200
         self.auto_evolve = True
-        self.points = []
-        self.colors = []
+        self.points = np.array([])
+        self.colors = np.array([])
+        self.point_sizes = np.array([])
         self.simulation = None
         self.last_evolution = time.time()
         self.evolution_interval = 0.1  # seconds
@@ -98,52 +99,54 @@ class PygameQuantumViz:
         x_coords, y_coords, z_coords = torch.where(mask)
         values = data_sub[mask]
         
-        # Limit points for performance show points with max values, no random sampling
+        # Limit points for performance - use topk instead of argsort for better performance
         max_points = 1000
         if len(values) > max_points:
-            indices = torch.argsort(values)[-max_points:]
+            # topk is much faster than argsort when we only need the top k values
+            top_values, indices = torch.topk(values, max_points)
             x_coords = x_coords[indices]
             y_coords = y_coords[indices]
             z_coords = z_coords[indices]
-            values = values[indices]
-
-
+            values = top_values
         
-        # Convert to world coordinates
+        # Convert to world coordinates using vectorized operations
         center = self.SIZE_X // 2
         scale = 0.05
-        self.points = []
-        self.colors = []
         
         if len(values) > 0:
-            # Normalize values for color mapping
+            # Vectorized coordinate conversion
+            positions = torch.stack([x_coords, y_coords, z_coords], dim=1).float()
+            positions = (positions * step - center) * scale
+            self.points = positions.cpu().numpy()
+            
+            # Vectorized color mapping (hot colormap)
             val_min = values.min()
             val_max = values.max()
             val_range = val_max - val_min if val_max > val_min else 1.0
+            val_norm = (values - val_min) / val_range
             
-            for i in range(len(x_coords)):
-                # Position (center and scale)
-                x = (x_coords[i] * step - center) * scale
-                y = (y_coords[i] * step - center) * scale
-                z = (z_coords[i] * step - center) * scale
-                self.points.append([x, y, z])
-                
-                # Color based on probability (hot colormap)
-                val_norm = (values[i] - val_min) / val_range
-                if val_norm < 0.33:
-                    r = val_norm * 3
-                    g = 0
-                    b = 0
-                elif val_norm < 0.66:
-                    r = 1.0
-                    g = (val_norm - 0.33) * 3
-                    b = 0
-                else:
-                    r = 1.0
-                    g = 1.0
-                    b = (val_norm - 0.66) * 3
-                
-                self.colors.append([r, g, b])
+            # Vectorized hot colormap calculation
+            colors = torch.zeros(len(values), 3)
+            
+            # Red component
+            colors[:, 0] = torch.where(val_norm < 0.33, val_norm * 3, 1.0)
+            
+            # Green component  
+            colors[:, 1] = torch.where(val_norm < 0.33, 0.0,
+                                     torch.where(val_norm < 0.66, (val_norm - 0.33) * 3, 1.0))
+            
+            # Blue component
+            colors[:, 2] = torch.where(val_norm < 0.66, 0.0, (val_norm - 0.66) * 3)
+            
+            self.colors = colors.cpu().numpy()
+            
+            # Pre-calculate point sizes for batched rendering
+            intensities = colors.mean(dim=1)
+            self.point_sizes = (2.0 + 8.0 * intensities).cpu().numpy()
+        else:
+            self.points = np.array([])
+            self.colors = np.array([])
+            self.point_sizes = np.array([])
                 
     def draw_scene(self):
         """Draw the quantum visualization scene."""
@@ -199,28 +202,37 @@ class PygameQuantumViz:
         glPointSize(1.0)
         
     def draw_quantum_points(self):
-        """Draw quantum probability points."""
-        if not self.points:
+        """Draw quantum probability points with optimized batching."""
+        if len(self.points) == 0:
             return
             
-        # Draw points with varying sizes - need to draw each point separately
-        # because glPointSize can't be called between glBegin/glEnd
-        for i, point in enumerate(self.points):
+        # Group points by size to minimize OpenGL state changes
+        size_groups = {}
+        for i in range(len(self.points)):
             if i < len(self.colors):
                 color = self.colors[i]
                 # Calculate point size based on color intensity (brightness)
                 intensity = (color[0] + color[1] + color[2]) / 3.0
-                point_size = 2.0 + 8.0 * intensity
-                
-                glPointSize(point_size)
-                glColor3f(color[0], color[1], color[2])
+                point_size = int(2.0 + 8.0 * intensity)  # Quantize to reduce groups
             else:
-                glPointSize(4.0)
-                glColor3f(1.0, 1.0, 0.0)  # Default yellow
-            
-            # Draw single point
+                point_size = 4
+                
+            if point_size not in size_groups:
+                size_groups[point_size] = {'points': [], 'colors': []}
+            size_groups[point_size]['points'].append(self.points[i])
+            if i < len(self.colors):
+                size_groups[point_size]['colors'].append(self.colors[i])
+            else:
+                size_groups[point_size]['colors'].append([1.0, 1.0, 0.0])
+        
+        # Draw each size group in batch
+        for size, group in size_groups.items():
+            glPointSize(float(size))
             glBegin(GL_POINTS)
-            glVertex3f(point[0], point[1], point[2])
+            for j, point in enumerate(group['points']):
+                color = group['colors'][j]
+                glColor3f(color[0], color[1], color[2])
+                glVertex3f(point[0], point[1], point[2])
             glEnd()
             
         glPointSize(1.0)  # Reset point size

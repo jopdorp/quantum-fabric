@@ -21,9 +21,7 @@ This approach combines the best of both worlds:
 import torch
 import torch.nn.functional as F
 from typing import List
-import math
-from scipy.special import genlaguerre
-import numpy as np
+
 
 # Import existing components
 from config import SIZE_X, SIZE_Y, SIZE_Z, TIME_STEPS, SCALE, center_x, center_y, center_z, POTENTIAL_STRENGTH, NUCLEAR_REPULSION_STRENGTH, NUCLEAR_CORE_RADIUS, DEVICE, X, Y, Z

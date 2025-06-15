@@ -22,7 +22,7 @@ from hybrid_molecular_simulation import (
     HybridMolecularSimulation, MolecularElectron, MolecularNucleus, 
     create_atom_electron, gaussian_filter_torch
 )
-from config import TIME_STEPS, SCALE, center_x, center_y, center_z, X, Y, Z
+from config import TIME_STEPS, SCALE, center_x, center_y, center_z
 from video_utils import StreamingVideoWriter, open_video
 
 class ElectronInfo:
@@ -35,23 +35,39 @@ class ElectronInfo:
 
 
 class AtomConfig:
-    """Configuration for creating an atom with its electrons - supports 3D"""
-    def __init__(self, atomic_number: int, position: Tuple[float, float, float] = None, 
+    """Configuration for creating an atom with its electrons - supports both 2D and 3D"""
+    def __init__(self, atomic_number: int, position: Tuple[float, ...] = None, 
                  position_2d: Tuple[float, float] = None,
                  electron_configs: List[Tuple[int, int, int]] = None):
         self.atomic_number = atomic_number
         
-        # Support both 2D and 3D positioning
-        if position is not None:
-            self.position = position  # 3D position (x, y, z)
-            self.is_3d = True
-        elif position_2d is not None:
+        # Import simulation mode from config
+        from config import SIMULATION_MODE
+        
+        # Support both 2D and 3D positioning based on current simulation mode
+        if position_2d is not None:
+            # Explicit 2D position
             self.position = position_2d  # 2D position (x, y)
             self.is_3d = False
+        elif position is not None:
+            if len(position) == 2:
+                # 2D position provided as tuple
+                self.position = position  # 2D position (x, y)
+                self.is_3d = False
+            elif len(position) == 3:
+                # 3D position provided
+                self.position = position  # 3D position (x, y, z)
+                self.is_3d = True
+            else:
+                raise ValueError("Position must be 2D (x, y) or 3D (x, y, z)")
         else:
-            # Default to center
-            self.position = (center_x, center_y, center_z)
-            self.is_3d = True
+            # Default to center based on simulation mode
+            if SIMULATION_MODE == "3D":
+                self.position = (center_x, center_y, center_z)
+                self.is_3d = True
+            else:  # 2D mode
+                self.position = (center_x, center_y)
+                self.is_3d = False
             
         self.electron_configs = electron_configs or self._default_electron_config()
     
@@ -94,6 +110,10 @@ class UnifiedHybridMolecularSimulation(HybridMolecularSimulation):
                  electron_repulsion_strength: float = 0.15,
                  nuclear_motion_enabled: bool = True,
                  damping_factor: float = 0.98):
+        
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X, Y, Z = get_coordinate_tensors()
         
         # Create fake individual electrons for the parent class
         fake_electrons = []
@@ -166,6 +186,10 @@ class UnifiedHybridMolecularSimulation(HybridMolecularSimulation):
     
     def analyze_atomic_character(self) -> dict:
         """Analyze how much atomic character vs molecular character the electrons have."""
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X, Y, Z = get_coordinate_tensors()
+        
         density = self.get_electron_density()
         
         if len(self.nuclei) < 2:
@@ -214,13 +238,17 @@ class UnifiedHybridMolecularSimulation(HybridMolecularSimulation):
 def create_atom_simulation(atom_config: AtomConfig) -> UnifiedHybridMolecularSimulation:
     """Create a unified simulation for a single atom - supports both 2D and 3D."""
     
-    # Create nucleus
-    if atom_config.is_3d and len(atom_config.position) == 3:
+    from config import SIMULATION_MODE, get_coordinate_tensors
+    # Get current coordinate tensors based on current simulation mode
+    X, Y, Z = get_coordinate_tensors()
+    
+    # Create nucleus based on simulation mode
+    if SIMULATION_MODE == "3D" and len(atom_config.position) >= 3:
         # 3D nucleus
         nuclei = [MolecularNucleus(atom_config.position[0], atom_config.position[1], atom_config.position[2],
                                   atomic_number=atom_config.atomic_number, atom_id=0)]
     else:
-        # 2D nucleus (backward compatibility)
+        # 2D nucleus
         nuclei = [MolecularNucleus(atom_config.position[0], atom_config.position[1], 
                                   atomic_number=atom_config.atomic_number, atom_id=0)]
     
@@ -233,24 +261,22 @@ def create_atom_simulation(atom_config: AtomConfig) -> UnifiedHybridMolecularSim
     for i, (n, l, m) in enumerate(atom_config.electron_configs):
         print(f"  Creating electron {i+1}: {n}{['s','p','d','f'][l]} orbital")
         
-        # Create wavefunction - automatically detect 2D vs 3D from coordinate system
-        if len(X.shape) == 3:  # 3D coordinate system
+        # Create wavefunction based on simulation mode
+        if SIMULATION_MODE == "3D":
             # 3D electron wavefunction
-            psi = create_atom_electron(X, Y, Z, atom_config.position[0], atom_config.position[1], 
+            psi = create_atom_electron(X, Y, Z, 
+                                      atom_config.position[0], atom_config.position[1], 
                                       atom_config.position[2] if len(atom_config.position) > 2 else center_z,
                                       (n, l, m), atomic_number=atom_config.atomic_number, 
                                       scale=SCALE/10)
         else:
-            # 2D electron wavefunction - create a dummy Z coordinate
-            # We'll need to add backward compatibility to create_atom_electron
-            psi = create_atom_electron(X, Y, torch.zeros_like(X), 
-                                      atom_config.position[0], atom_config.position[1], 0.0,
+            # 2D electron wavefunction - pass None for Z coordinates
+            psi = create_atom_electron(X, Y, None, 
+                                      atom_config.position[0], atom_config.position[1], None,
                                       (n, l, m), atomic_number=atom_config.atomic_number, 
                                       scale=SCALE/10)
-            # For 2D, take the middle slice of the 3D result
-            if len(psi.shape) == 3:
-                psi = psi[:, :, psi.shape[2]//2]
         
+        print(f"    Created wavefunction with shape: {psi.shape}")
         electron_wavefunctions.append(psi)
         
         # Create electron info
@@ -273,6 +299,8 @@ def create_atom_simulation(atom_config: AtomConfig) -> UnifiedHybridMolecularSim
     if norm > 0:
         unified_psi = unified_psi / norm
     
+    print(f"Final unified wavefunction shape: {unified_psi.shape}")
+    
     return UnifiedHybridMolecularSimulation(
         nuclei=nuclei,
         electron_infos=electron_infos,
@@ -287,11 +315,20 @@ def create_molecule_simulation(atom_configs: List[AtomConfig],
                              bond_type: str = "bonding") -> UnifiedHybridMolecularSimulation:
     """Create a unified simulation for a molecule with multiple atoms."""
     
-    # Create nuclei
+    from config import SIMULATION_MODE, get_coordinate_tensors
+    
+    # Get current coordinate tensors based on current simulation mode
+    X_current, Y_current, Z_current = get_coordinate_tensors()
+    
+    # Create nuclei based on simulation mode
     nuclei = []
     for i, config in enumerate(atom_configs):
-        nuclei.append(MolecularNucleus(config.position[0], config.position[1],
-                                     atomic_number=config.atomic_number, atom_id=i))
+        if SIMULATION_MODE == "3D" and len(config.position) >= 3:
+            nuclei.append(MolecularNucleus(config.position[0], config.position[1], config.position[2],
+                                         atomic_number=config.atomic_number, atom_id=i))
+        else:
+            nuclei.append(MolecularNucleus(config.position[0], config.position[1],
+                                         atomic_number=config.atomic_number, atom_id=i))
     
     # Create all electron wavefunctions
     all_electron_wavefunctions = []
@@ -301,10 +338,21 @@ def create_molecule_simulation(atom_configs: List[AtomConfig],
         print(f"Creating {len(config.electron_configs)} electrons for atom {atom_id+1} (Z={config.atomic_number})...")
         
         for i, (n, l, m) in enumerate(config.electron_configs):
-            # Create wavefunction
-            psi = create_atom_electron(X, Y, config.position[0], config.position[1], 
-                                      (n, l, m), atomic_number=config.atomic_number, 
-                                      scale=SCALE/10)
+            # Create wavefunction based on simulation mode
+            if SIMULATION_MODE == "3D":
+                # 3D electron wavefunction
+                psi = create_atom_electron(X_current, Y_current, Z_current, 
+                                          config.position[0], config.position[1], 
+                                          config.position[2] if len(config.position) > 2 else center_z,
+                                          (n, l, m), atomic_number=config.atomic_number, 
+                                          scale=SCALE/10)
+            else:
+                # 2D electron wavefunction - pass None for Z coordinates
+                psi = create_atom_electron(X_current, Y_current, None, 
+                                          config.position[0], config.position[1], None,
+                                          (n, l, m), atomic_number=config.atomic_number, 
+                                          scale=SCALE/10)
+            
             all_electron_wavefunctions.append(psi)
             
             # Create electron info
@@ -431,6 +479,10 @@ def run_simulation(simulation: UnifiedHybridMolecularSimulation,
 # Legacy function for backward compatibility
 def create_unified_hydrogen_molecule_simulation() -> UnifiedHybridMolecularSimulation:
     """Create a unified H2 molecule simulation with combined wavefunction that preserves atomic character."""
+    # Get current coordinate tensors
+    from config import get_coordinate_tensors
+    X, Y, Z = get_coordinate_tensors()
+    
     # Molecular parameters - closer spacing to see interaction
     bond_length = 1.6 * SCALE  # Closer for better interaction
     nucleus1_x = center_x - bond_length/2

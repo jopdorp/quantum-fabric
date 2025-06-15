@@ -82,6 +82,7 @@ class PygameQuantumViz:
     def update_quantum_data(self):
         """Update quantum data from simulation."""
         if not self.simulation:
+            print("No simulation available for visualization")
             return
             
         # Get wavefunction data
@@ -89,6 +90,14 @@ class PygameQuantumViz:
         
         # Calculate probability density
         data = torch.abs(wavefunction)**2
+        
+        # Handle both 2D and 3D data
+        if len(data.shape) == 2:
+            # 2D data - add a dummy Z dimension
+            data = data.unsqueeze(2)  # Add Z dimension
+            is_2d = True
+        else:
+            is_2d = False
         
         # Subsample for visualization
         step = 6
@@ -99,6 +108,12 @@ class PygameQuantumViz:
         x_coords, y_coords, z_coords = torch.where(mask)
         values = data_sub[mask]
         
+        # For 2D data, flatten Z coordinates
+        if is_2d:
+            z_coords = torch.zeros_like(x_coords)
+        
+        print(f"Found {len(values)} points above threshold")
+        
         # Limit points for performance - use topk instead of argsort for better performance
         max_points = 1000
         if len(values) > max_points:
@@ -108,6 +123,7 @@ class PygameQuantumViz:
             y_coords = y_coords[indices]
             z_coords = z_coords[indices]
             values = top_values
+            print(f"Reduced to {max_points} points for performance")
         
         # Convert to world coordinates using vectorized operations
         center = self.SIZE_X // 2

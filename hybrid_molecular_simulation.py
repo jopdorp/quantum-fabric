@@ -24,7 +24,7 @@ from typing import List
 
 
 # Import existing components
-from config import SIZE_X, SIZE_Y, SIZE_Z, TIME_STEPS, SCALE, center_x, center_y, center_z, POTENTIAL_STRENGTH, NUCLEAR_REPULSION_STRENGTH, NUCLEAR_CORE_RADIUS, DEVICE, X, Y, Z
+from config import SIZE_X, SIZE_Y, SIZE_Z, TIME_STEPS, SCALE, center_x, center_y, center_z, POTENTIAL_STRENGTH, NUCLEAR_REPULSION_STRENGTH, NUCLEAR_CORE_RADIUS, DEVICE
 from torch_physics import propagate_wave_batch_with_potentials
 from video_utils import StreamingVideoWriter, open_video
 
@@ -99,23 +99,26 @@ def gaussian_filter_torch(input_tensor, sigma):
         # Remove batch and channel dimensions
         return filtered_hv.squeeze(0).squeeze(0)
 
-def create_atom_electron(x_tensor, y_tensor, z_tensor, cx, cy, cz, quantum_numbers, atomic_number=1, alpha=None, scale=SCALE):
-    """Create 3D atomic orbital wavefunctions using pure PyTorch for GPU acceleration.
+def create_atom_electron(x_tensor, y_tensor, z_tensor_or_none, cx, cy, cz_or_none, quantum_numbers, atomic_number=1, alpha=None, scale=SCALE):
+    """Create atomic orbital wavefunctions using pure PyTorch for GPU acceleration.
     
-    This is a fully GPU-accelerated 3D atomic orbital generator.
+    Supports both 2D and 3D modes automatically based on input parameters.
     
     Args:
-        x, y, z: coordinate grids (3D torch tensors)
-        cx, cy, cz: center position (nucleus location)
+        x_tensor, y_tensor: coordinate grids (torch tensors)
+        z_tensor_or_none: Z coordinate grid (torch tensor) for 3D, or None for 2D
+        cx, cy: center position (nucleus location)
+        cz_or_none: Z center position for 3D, or None for 2D  
         quantum_numbers: (n, l, m) quantum numbers
         atomic_number: nuclear charge Z (default: 1 for hydrogen)
         alpha: screening parameter for Z_eff (default: auto-calculated)
     
     Returns:
-        Complex wavefunction representing the 3D atomic orbital (torch tensor)
+        Complex wavefunction representing the atomic orbital (torch tensor)
     """
     n, l, m = quantum_numbers
     device = x_tensor.device
+    is_3d = z_tensor_or_none is not None
     
     # Calculate screening parameter (alpha) using a simple universal formula
     if alpha is None:
@@ -148,12 +151,18 @@ def create_atom_electron(x_tensor, y_tensor, z_tensor, cx, cy, cz, quantum_numbe
     # Create coordinates relative to center (pure torch)
     dx = x_tensor - cx
     dy = y_tensor - cy
-    dz = z_tensor - cz
-    r = torch.sqrt(dx**2 + dy**2 + dz**2)
     
-    # Spherical coordinates
-    theta = torch.acos(torch.clamp(dz / (r + 1e-10), -1.0, 1.0))  # Polar angle (0 to π)
-    phi = torch.atan2(dy, dx)  # Azimuthal angle (0 to 2π)
+    if is_3d:
+        dz = z_tensor_or_none - cz_or_none
+        r = torch.sqrt(dx**2 + dy**2 + dz**2)
+        
+        # Spherical coordinates for 3D
+        theta = torch.acos(torch.clamp(dz / (r + 1e-10), -1.0, 1.0))  # Polar angle (0 to π)
+        phi = torch.atan2(dy, dx)  # Azimuthal angle (0 to 2π)
+    else:
+        # 2D polar coordinates
+        r = torch.sqrt(dx**2 + dy**2)
+        phi = torch.atan2(dy, dx)  # Azimuthal angle only
     
     # Create atomic radial wavefunction using effective nuclear charge
     rho = 2 * z_eff * r / (n * orbital_radius)
@@ -170,28 +179,56 @@ def create_atom_electron(x_tensor, y_tensor, z_tensor, cx, cy, cz, quantum_numbe
         radial = radial * oscillations
     
     # Create angular part using simplified real spherical harmonics
-    if l == 0:  # s orbitals - spherically symmetric
-        angular = torch.ones_like(theta)
-    elif l == 1:  # p orbitals
-        if m == -1:
-            angular = torch.sin(theta) * torch.sin(phi)  # p_y
-        elif m == 0:
-            angular = torch.cos(theta)                    # p_z  
-        elif m == 1:
-            angular = torch.sin(theta) * torch.cos(phi)   # p_x
-    elif l == 2:  # d orbitals
-        if m == -2:
-            angular = torch.sin(theta)**2 * torch.sin(2*phi)  # d_xy
-        elif m == -1:
-            angular = torch.sin(theta) * torch.cos(theta) * torch.sin(phi)  # d_yz
-        elif m == 0:
-            angular = 3*torch.cos(theta)**2 - 1  # d_z²
-        elif m == 1:
-            angular = torch.sin(theta) * torch.cos(theta) * torch.cos(phi)  # d_xz
-        elif m == 2:
-            angular = torch.sin(theta)**2 * torch.cos(2*phi)  # d_x²-y²
-    else:  # Higher l orbitals - simplified patterns
-        angular = torch.cos(l * phi) * (torch.sin(theta)**l)
+    if is_3d:
+        # 3D spherical harmonics
+        if l == 0:  # s orbitals - spherically symmetric
+            angular = torch.ones_like(theta)
+        elif l == 1:  # p orbitals
+            if m == -1:
+                angular = torch.sin(theta) * torch.sin(phi)  # p_y
+            elif m == 0:
+                angular = torch.cos(theta)                    # p_z  
+            elif m == 1:
+                angular = torch.sin(theta) * torch.cos(phi)   # p_x
+        elif l == 2:  # d orbitals
+            if m == -2:
+                angular = torch.sin(theta)**2 * torch.sin(2*phi)  # d_xy
+            elif m == -1:
+                angular = torch.sin(theta) * torch.cos(theta) * torch.sin(phi)  # d_yz
+            elif m == 0:
+                angular = 3*torch.cos(theta)**2 - 1  # d_z²
+            elif m == 1:
+                angular = torch.sin(theta) * torch.cos(theta) * torch.cos(phi)  # d_xz
+            elif m == 2:
+                angular = torch.sin(theta)**2 * torch.cos(2*phi)  # d_x²-y²
+        else:  # Higher l orbitals - simplified patterns
+            angular = torch.cos(l * phi) * (torch.sin(theta)**l)
+    else:
+        # 2D angular functions - proper cross-sectional views of 3D orbitals
+        if l == 0:  # s orbitals - spherically symmetric
+            angular = torch.ones_like(phi)
+        elif l == 1:  # p orbitals - show proper dumbbell patterns
+            if m == -1:
+                angular = torch.sin(phi)  # p_y cross-section
+            elif m == 0:
+                # p_z in 2D shows as two lobes along y-axis
+                angular = torch.abs(torch.cos(phi))  # Two-lobe pattern
+            elif m == 1:
+                angular = torch.cos(phi)  # p_x cross-section
+        elif l == 2:  # d orbitals - show proper 2D cross-sections
+            if m == -2:
+                angular = torch.sin(2*phi)  # d_xy four-lobe pattern
+            elif m == -1:
+                angular = torch.sin(phi) * torch.cos(phi)  # d_yz cross-section
+            elif m == 0:
+                # d_z² shows as alternating pattern in 2D
+                angular = 3*torch.cos(phi)**2 - 1  # Similar to 3D but in 2D
+            elif m == 1:
+                angular = torch.sin(phi) * torch.cos(phi)  # d_xz cross-section  
+            elif m == 2:
+                angular = torch.cos(2*phi)  # d_x²-y² two-lobe pattern
+        else:  # Higher l orbitals - simplified patterns
+            angular = torch.cos(l * phi)
     
     # Combine radial and angular parts
     psi = radial * angular
@@ -224,15 +261,18 @@ class MolecularElectron:
 
 
 class MolecularNucleus:
-    """Enhanced nucleus class with molecular properties - supports 3D."""
+    """Enhanced nucleus class with molecular properties - supports both 2D and 3D."""
     
     def __init__(self, x: float, y: float, z: float = None, atomic_number: int = 1, atom_id: int = 0):
-        if z is None:  # Backward compatibility for 2D
-            self.position = torch.tensor([x, y], dtype=torch.float32, requires_grad=False)
-            self.velocity = torch.zeros(2, dtype=torch.float32, requires_grad=False)
-        else:  # 3D mode
+        # Store position based on dimensionality
+        self.is_3d = z is not None
+        if self.is_3d:
             self.position = torch.tensor([x, y, z], dtype=torch.float32, requires_grad=False)
             self.velocity = torch.zeros(3, dtype=torch.float32, requires_grad=False)
+        else:  # 2D mode
+            self.position = torch.tensor([x, y], dtype=torch.float32, requires_grad=False)
+            self.velocity = torch.zeros(2, dtype=torch.float32, requires_grad=False)
+            
         self.atomic_number = atomic_number
         self.atom_id = atom_id
         self.mass_ratio = 1836.0  # Proton to electron mass ratio
@@ -284,20 +324,24 @@ class HybridMolecularSimulation:
         Includes nuclear attraction + repulsion from other electrons.
         Supports both 2D and 3D.
         """
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X_current, Y_current, Z_current = get_coordinate_tensors()
+        
         if len(self.electrons[0].wavefunction.shape) == 3:  # 3D case
-            potential = torch.zeros_like(X, dtype=torch.float32)
+            potential = torch.zeros_like(X_current, dtype=torch.float32)
         else:  # 2D case
-            potential = torch.zeros_like(X, dtype=torch.float32)
+            potential = torch.zeros_like(X_current, dtype=torch.float32)
         
         # Nuclear attraction potentials
         for nucleus in self.nuclei:
             if len(nucleus.position) == 3:  # 3D nucleus
                 V_nuclear = self.create_nucleus_potential_3d(
-                    X, Y, Z, nucleus.position[0], nucleus.position[1], nucleus.position[2], nucleus.atomic_number
+                    X_current, Y_current, Z_current, nucleus.position[0], nucleus.position[1], nucleus.position[2], nucleus.atomic_number
                 )
             else:  # 2D nucleus
                 V_nuclear = self.create_nucleus_potential_2d(
-                    X, Y, nucleus.position[0], nucleus.position[1], nucleus.atomic_number
+                    X_current, Y_current, nucleus.position[0], nucleus.position[1], nucleus.atomic_number
                 )
             potential += V_nuclear
         
@@ -347,13 +391,17 @@ class HybridMolecularSimulation:
 
     def compute_all_electron_potentials(self) -> List[torch.Tensor]:
         """Compute potentials for all electrons efficiently."""
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X_current, Y_current, Z_current = get_coordinate_tensors()
+        
         potentials = []
         
         # Pre-compute nuclear potentials (same for all electrons)
-        nuclear_potential = torch.zeros_like(X, dtype=torch.float32)
+        nuclear_potential = torch.zeros_like(X_current, dtype=torch.float32)
         for nucleus in self.nuclei:
             V_nuclear = self.create_nucleus_potential(
-                X, Y, nucleus.position[0], nucleus.position[1], nucleus.atomic_number
+                X_current, Y_current, nucleus.position[0], nucleus.position[1], nucleus.atomic_number
             )
             nuclear_potential += V_nuclear
         
@@ -380,24 +428,56 @@ class HybridMolecularSimulation:
     
 
     def compute_force_from_density(self, charge_density, nucleus_pos):
-        """Compute forces on nucleus from electron density - supports torch tensors."""
-        dx = X - nucleus_pos[0]
-        dy = Y - nucleus_pos[1]
-        r = torch.sqrt(dx**2 + dy**2)
-        r = torch.maximum(r, torch.tensor(1.0))
-        force_x = torch.sum((dx / r**3) * charge_density)
-        force_y = torch.sum((dy / r**3) * charge_density)
-        return torch.tensor([force_x, force_y], dtype=torch.float32)
+        """Compute forces on nucleus from electron density - supports both 2D and 3D."""
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X_current, Y_current, Z_current = get_coordinate_tensors()
+        
+        dx = X_current - nucleus_pos[0]
+        dy = Y_current - nucleus_pos[1]
+        
+        if len(nucleus_pos) == 3 and Z_current is not None:
+            # 3D force calculation
+            dz = Z_current - nucleus_pos[2]
+            r = torch.sqrt(dx**2 + dy**2 + dz**2)
+            r = torch.maximum(r, torch.tensor(1.0))
+            force_x = torch.sum((dx / r**3) * charge_density)
+            force_y = torch.sum((dy / r**3) * charge_density)
+            force_z = torch.sum((dz / r**3) * charge_density)
+            return torch.tensor([force_x, force_y, force_z], dtype=torch.float32)
+        else:
+            # 2D force calculation
+            r = torch.sqrt(dx**2 + dy**2)
+            r = torch.maximum(r, torch.tensor(1.0))
+            force_x = torch.sum((dx / r**3) * charge_density)
+            force_y = torch.sum((dy / r**3) * charge_density)
+            return torch.tensor([force_x, force_y], dtype=torch.float32)
 
     def compute_nuclear_forces(self) -> List[torch.Tensor]:
         """Compute forces on nuclei from electron densities and other nuclei."""
-        forces = [torch.zeros(2) for _ in self.nuclei]
+        # Create force tensors with proper dimensionality based on simulation mode
+        from config import SIMULATION_MODE
+        
+        forces = []
+        for nucleus in self.nuclei:
+            if SIMULATION_MODE == "3D":
+                forces.append(torch.zeros(3))  # 3D force
+            else:
+                forces.append(torch.zeros(2))  # 2D force
         
         # Forces from electrons
         for i, nucleus in enumerate(self.nuclei):
             for electron in self.electrons:
                 density = electron.get_density()
                 force = self.compute_force_from_density(density, nucleus.position)
+                
+                # Ensure force has same dimensionality as forces[i]
+                if len(forces[i]) == 3 and len(force) == 2:
+                    # Convert 2D force to 3D (add zero z-component)
+                    force = torch.tensor([force[0], force[1], 0.0], dtype=torch.float32)
+                elif len(forces[i]) == 2 and len(force) == 3:
+                    # Convert 3D force to 2D (ignore z-component)
+                    force = torch.tensor([force[0], force[1]], dtype=torch.float32)
                 
                 # All electrons exert forces on all nuclei
                 # Electrons from same atom: attractive
@@ -414,36 +494,58 @@ class HybridMolecularSimulation:
                 if i != j:
                     dx = nucleus2.position[0] - nucleus1.position[0]
                     dy = nucleus2.position[1] - nucleus1.position[1]
-                    r = torch.sqrt(dx**2 + dy**2)
-                    r = torch.maximum(r, torch.tensor(2.0))  # Prevent singularity
                     
-                    # Coulomb repulsion F = k*q1*q2/r^2
-                    force_magnitude = 2.0 * nucleus1.atomic_number * nucleus2.atomic_number / (r**2)  # Much weaker repulsion
-                    
-                    # Direction away from other nucleus
-                    force_x = -force_magnitude * dx / r
-                    force_y = -force_magnitude * dy / r
-                    
-                    forces[i][0] += force_x
-                    forces[i][1] += force_y
+                    if len(forces[i]) == 3:
+                        # 3D repulsion
+                        dz = nucleus2.position[2] - nucleus1.position[2] if len(nucleus2.position) > 2 else 0.0
+                        r = torch.sqrt(dx**2 + dy**2 + dz**2)
+                        r = torch.maximum(r, torch.tensor(2.0))  # Prevent singularity
+                        
+                        # Coulomb repulsion F = k*q1*q2/r^2
+                        force_magnitude = 2.0 * nucleus1.atomic_number * nucleus2.atomic_number / (r**2)
+                        
+                        # Direction away from other nucleus
+                        force_x = -force_magnitude * dx / r
+                        force_y = -force_magnitude * dy / r
+                        force_z = -force_magnitude * dz / r
+                        
+                        forces[i][0] += force_x
+                        forces[i][1] += force_y
+                        forces[i][2] += force_z
+                    else:
+                        # 2D repulsion
+                        r = torch.sqrt(dx**2 + dy**2)
+                        r = torch.maximum(r, torch.tensor(2.0))  # Prevent singularity
+                        
+                        # Coulomb repulsion F = k*q1*q2/r^2
+                        force_magnitude = 2.0 * nucleus1.atomic_number * nucleus2.atomic_number / (r**2)
+                        
+                        # Direction away from other nucleus
+                        force_x = -force_magnitude * dx / r
+                        force_y = -force_magnitude * dy / r
+                        
+                        forces[i][0] += force_x
+                        forces[i][1] += force_y
         
         return forces
     
     def apply_absorbing_boundaries(self, wavefunction: torch.Tensor) -> torch.Tensor:
         # Create circular absorbing mask - exponential decay near circular boundary
-        # Use global X, Y, Z tensors for grid coordinates
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X_current, Y_current, Z_current = get_coordinate_tensors()
         
         # Calculate distance from center of simulation domain
         if len(wavefunction.shape) == 3:  # 3D case
             center_x_pos = SIZE_X / 2.0
             center_y_pos = SIZE_Y / 2.0
             center_z_pos = SIZE_Z / 2.0
-            r = torch.sqrt((X - center_x_pos)**2 + (Y - center_y_pos)**2 + (Z - center_z_pos)**2)
+            r = torch.sqrt((X_current - center_x_pos)**2 + (Y_current - center_y_pos)**2 + (Z_current - center_z_pos)**2)
             max_radius = min(SIZE_X, SIZE_Y, SIZE_Z) / 2.0 * 0.9  # Spherical boundary
         else:  # 2D case
             center_x_pos = SIZE_X / 2.0
             center_y_pos = SIZE_Y / 2.0
-            r = torch.sqrt((X - center_x_pos)**2 + (Y - center_y_pos)**2)
+            r = torch.sqrt((X_current - center_x_pos)**2 + (Y_current - center_y_pos)**2)
             max_radius = min(SIZE_X, SIZE_Y) / 2.0 * 0.9  # Circular boundary
         
         # Define boundary parameters
@@ -528,7 +630,11 @@ class HybridMolecularSimulation:
     
     def get_combined_density(self) -> torch.Tensor:
         """Get combined electron density for visualization."""
-        total_density = torch.zeros_like(X, dtype=torch.float32)
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X_current, Y_current, Z_current = get_coordinate_tensors()
+        
+        total_density = torch.zeros_like(X_current, dtype=torch.float32)
         
         for electron in self.electrons:
             density = electron.get_density()
@@ -538,10 +644,14 @@ class HybridMolecularSimulation:
     
     def get_combined_wavefunction(self) -> torch.Tensor:
         """Get combined wavefunction for visualization."""
-        if not self.electrons:
-            return torch.zeros_like(X, dtype=torch.complex64)
+        # Get current coordinate tensors
+        from config import get_coordinate_tensors
+        X_current, Y_current, Z_current = get_coordinate_tensors()
         
-        combined = torch.zeros_like(X, dtype=torch.complex64)
+        if not self.electrons:
+            return torch.zeros_like(X_current, dtype=torch.complex64)
+        
+        combined = torch.zeros_like(X_current, dtype=torch.complex64)
         for electron in self.electrons:
             # Keep everything as torch tensors, no need for numpy conversion
             wf = electron.wavefunction
@@ -571,11 +681,15 @@ def create_hydrogen_molecule_simulation() -> HybridMolecularSimulation:
     
     # Create electrons with realistic hydrogen 1s orbitals (3x bigger for better visualization)
     print("Creating electron 1 (atom 0)...")
-    psi1 = create_atom_electron(X, Y, nucleus1_x, nucleus_y, (1, 0, 0), 
+    # Get current coordinate tensors
+    from config import get_coordinate_tensors
+    X_current, Y_current, Z_current = get_coordinate_tensors()
+    
+    psi1 = create_atom_electron(X_current, Y_current, nucleus1_x, nucleus_y, (1, 0, 0), 
                                atomic_number=1, scale=SCALE /10)
     
     print("Creating electron 2 (atom 1)...")
-    psi2 = create_atom_electron(X, Y, nucleus2_x, nucleus_y, (1, 0, 0), 
+    psi2 = create_atom_electron(X_current, Y_current, nucleus2_x, nucleus_y, (1, 0, 0), 
                                atomic_number=1, scale=SCALE /10)
     
     electrons = [

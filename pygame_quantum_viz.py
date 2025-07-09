@@ -71,10 +71,29 @@ class PygameQuantumViz:
         hydrogen_config = AtomConfig(
             atomic_number=1, 
             position=(SIZE_X//2, SIZE_Y//2, SIZE_Z//2),
-            electron_configs=[(2, 1, 0)]  # n=2, l=1, m=0 (2p orbital)
+            electron_configs=[(3, 2, 1)]  # n=2, l=1, m=0 (2p orbital)
         )
         
         self.simulation = create_atom_simulation(hydrogen_config)
+        
+        # Add momentum to the electron by applying a phase gradient
+        from config import get_coordinate_tensors
+        X, Y, Z = get_coordinate_tensors()
+        
+        # Create momentum phase shift: e^(i * p · r) where p is momentum vector
+        momentum = torch.tensor([0.1, 0.0, 0.1])  # momentum in x, y, z directions
+        
+        # Calculate phase shift across the grid
+        if Z is not None:
+            # 3D case
+            phase_shift = momentum[0] * X + momentum[1] * Y + momentum[2] * Z
+        else:
+            # 2D case - only use x and y components
+            phase_shift = momentum[0] * X + momentum[1] * Y
+        
+        # Apply momentum by multiplying wavefunction by phase factor
+        self.simulation.unified_wavefunction *= torch.exp(1j * phase_shift * 0.01)  # Small momentum
+        
         self.SIZE_X, self.SIZE_Y, self.SIZE_Z = SIZE_X, SIZE_Y, SIZE_Z
         self.update_quantum_data()
         print(f"Simulation initialized with {len(self.points)} quantum points")

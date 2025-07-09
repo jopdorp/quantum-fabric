@@ -568,7 +568,7 @@ class HybridMolecularSimulation:
         
         # Add quantum noise near boundaries for realism
         # Noise strength increases near boundaries (where quantum uncertainty is highest)
-        noise_strength = 0.000002 * normalized_depth
+        noise_strength = 0.00000002 * normalized_depth
         
         # Generate complex quantum noise (both amplitude and phase fluctuations)
         noise_real = torch.randn_like(wavefunction.real) * noise_strength

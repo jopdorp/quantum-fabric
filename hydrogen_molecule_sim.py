@@ -31,18 +31,27 @@ def create_hydrogen_molecule(bond_type: str = "bonding", mode: str = "2D") -> No
     # Bond length for H2
     bond_length = 1.2 * SCALE
     
+    # Calculate true geometric center for perfect symmetry
+    from config import SIZE_X, SIZE_Y, SIZE_Z
+    true_center_x = (SIZE_X - 1) / 2.0
+    true_center_y = (SIZE_Y - 1) / 2.0
+    true_center_z = (SIZE_Z - 1) / 2.0
+    
+    print(f"Using true geometric center: ({true_center_x:.3f}, {true_center_y:.3f})")
+    print(f"Bond length: {bond_length:.3f}, placing nuclei at symmetric positions")
+    
     # Configure hydrogen atoms based on mode
     if mode == "3D":
         # 3D positions
         hydrogen_configs = [
             AtomConfig(
                 atomic_number=1, 
-                position=(center_x - bond_length/2, center_y, center_z),
+                position=(true_center_x - bond_length/2, true_center_y, true_center_z),
                 electron_configs=[(1, 0, 0)]  # 1s electron
             ),
             AtomConfig(
                 atomic_number=1, 
-                position=(center_x + bond_length/2, center_y, center_z),
+                position=(true_center_x + bond_length/2, true_center_y, true_center_z),
                 electron_configs=[(1, 0, 0)]  # 1s electron
             )
         ]
@@ -51,12 +60,12 @@ def create_hydrogen_molecule(bond_type: str = "bonding", mode: str = "2D") -> No
         hydrogen_configs = [
             AtomConfig(
                 atomic_number=1, 
-                position=(center_x - bond_length/2, center_y),
+                position=(true_center_x - bond_length/2, true_center_y),
                 electron_configs=[(1, 0, 0)]  # 1s electron
             ),
             AtomConfig(
                 atomic_number=1, 
-                position=(center_x + bond_length/2, center_y),
+                position=(true_center_x + bond_length/2, true_center_y),
                 electron_configs=[(1, 0, 0)]  # 1s electron
             )
         ]

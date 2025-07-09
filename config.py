@@ -3,14 +3,16 @@ import torch
 
 
 # Simulation mode - can be changed at runtime
-SIMULATION_MODE = "2D"  # Can be "2D" or "3D"
+SIMULATION_MODE = "3D"  # Can be "2D" or "3D"
+ZOOM = 10.0
 
 # Grid and simulation parameters - adaptive for 2D/3D
 if SIMULATION_MODE == "3D":
-    SIZE = 256  # Reduced from 1024 due to 3D memory requirements (256^3 vs 1024^2)
+    SIZE = 128  # Reduced from 1024 due to 3D memory requirements (256^3 vs 1024^2)
     SIZE_X = SIZE
     SIZE_Y = SIZE
     SIZE_Z = SIZE
+    ZOOM = 200.0
 else:  # 2D mode
     SIZE = 1024  # Full resolution for 2D
     SIZE_X = SIZE
@@ -31,7 +33,6 @@ USE_BATCHED_PROPAGATION = True  # Always use batched electron propagation
 ENABLE_VECTORIZED_REPULSION = True  # Use vectorized electron-electron repulsion calculation
 
 # Zoom out configuration
-ZOOM = 10.0
 BASE_SCALE = 400.0
 SCALE = BASE_SCALE / ZOOM # grid-to-physics scale
 

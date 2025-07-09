@@ -483,11 +483,21 @@ def create_unified_hydrogen_molecule_simulation() -> UnifiedHybridMolecularSimul
     from config import get_coordinate_tensors
     X, Y, Z = get_coordinate_tensors()
     
-    # Molecular parameters - closer spacing to see interaction
-    bond_length = 1.6 * SCALE  # Closer for better interaction
-    nucleus1_x = center_x - bond_length/2
-    nucleus2_x = center_x + bond_length/2
-    nucleus_y = center_y
+    # Molecular parameters - ensure perfect symmetry
+    from config import SIZE_X, SIZE_Y
+    bond_length = 1.2 * SCALE  # Bond length
+    
+    # Calculate true center position (not integer-based)
+    true_center_x = (SIZE_X - 1) / 2.0  # True geometric center
+    true_center_y = (SIZE_Y - 1) / 2.0
+    
+    # Place nuclei symmetrically around true center  
+    nucleus1_x = true_center_x - bond_length/2
+    nucleus2_x = true_center_x + bond_length/2
+    nucleus_y = true_center_y
+    
+    print(f"Perfect symmetry: center = {true_center_x:.3f}, nucleus1 = {nucleus1_x:.3f}, nucleus2 = {nucleus2_x:.3f}")
+    print(f"Bond length = {bond_length:.3f}, half-bond = {bond_length/2:.3f}")
     
     # Create nuclei
     nuclei = [
